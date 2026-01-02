@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+
+  /* stronger, high-contrast grays (overrides Tailwind CSS variables) */
+  --color-gray-500: #4b5563; /* medium */
+  --color-gray-600: #374151; /* darker */
+  --color-gray-700: #1f2937; /* even darker */
+  --color-gray-800: #111827;
+  --color-gray-900: #0f172a;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+/* Improved base typography for readability */
+html {
+  font-size: 18px; /* larger base for easier reading */
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-size: 1rem;
+}
+
+/* Inputs and textareas: more readable text, larger tap targets */
+textarea,
+input {
+  font-size: 1rem;
+  line-height: 1.6;
+  padding: 0.75rem;
+  border-radius: 0.75rem;
+  outline: none;
+}
+
+/* Make textareas a bit taller by default */
+textarea {
+  min-height: 140px;
+}
+
+/* Buttons: larger and more accessible */
+button {
+  font-size: 1rem;
+  line-height: 1.2;
+  padding: 0.6rem 1rem;
+  border-radius: 0.75rem;
+  cursor: pointer;
+}
+
+/* Slightly tighten very wide content for better line length */
+main {
+  max-width: 44rem; /* ~704px for comfortable reading */
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Fallback/force for any compiled classes that might not use the vars */
+.text-gray-500 { color: #4b5563 !important; }
+.text-gray-600 { color: #374151 !important; }
+.text-gray-700 { color: #1f2937 !important; }
+.text-gray-800 { color: #111827 !important; }
+.text-gray-900 { color: #0f172a !important; }
