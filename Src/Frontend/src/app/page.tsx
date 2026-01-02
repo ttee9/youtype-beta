@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-const USE_MOCK = true;
+const USE_MOCK = false;
+const API_BASE = "http://localhost:8000";
 
 type TrendPoint = { date: string; count: number };
 
@@ -17,6 +18,18 @@ type SubmitResponse =
       examples: { text: string; similarity: number; created_at: string }[];
     }
   | { status: "rejected"; reason: string; policy_category?: string };
+
+type PostOut = {
+  id: string;
+  text: string;
+  location?: string | null;
+  created_at: string;
+};
+
+type PostsResponse = {
+  count: number;
+  posts: PostOut[];
+};
 
 function mockResponse(): SubmitResponse {
   const now = new Date();
@@ -74,6 +87,21 @@ export default function Page() {
   const [location, setLocation] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<SubmitResponse | null>(null);
+  const [recent, setRecent] = useState<PostOut[]>([]);
+
+  async function refreshRecent() {
+    try {
+      const res = await fetch(`${API_BASE}/posts`, { cache: "no-store" });
+      const data = (await res.json()) as PostsResponse;
+      setRecent(Array.isArray(data.posts) ? data.posts : []);
+    } catch {
+      // ignore; backend might not be running yet
+    }
+  }
+
+  useEffect(() => {
+    if (!USE_MOCK) refreshRecent();
+  }, []);
 
   const canAnalyze = useMemo(() => text.trim().length >= 10 && !loading, [text, loading]);
 
@@ -89,7 +117,7 @@ export default function Page() {
     }
 
     try {
-      const res = await fetch("http://localhost:8000/submit", {
+      const res = await fetch(`${API_BASE}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -100,6 +128,7 @@ export default function Page() {
 
       const data = await res.json();
       setResult(data);
+      await refreshRecent();
     } catch (err) {
       console.error(err);
     } finally {
@@ -162,6 +191,43 @@ export default function Page() {
             </div>
           </div>
         </section>
+
+        {/* Persisted submissions */}
+        {!USE_MOCK ? (
+          <section className="mt-6 rounded-2xl border bg-white p-5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold text-gray-900">Recent submissions</h2>
+              <button
+                className="rounded-lg border bg-gray-50 px-3 py-1 text-sm text-gray-700 hover:bg-gray-100"
+                onClick={refreshRecent}
+                type="button"
+              >
+                Refresh
+              </button>
+            </div>
+
+            {recent.length === 0 ? (
+              <p className="mt-3 text-sm text-gray-600">No saved posts yet (or backend isn’t running).</p>
+            ) : (
+              <div className="mt-3 space-y-3">
+                {recent.slice(0, 8).map((p) => (
+                  <article key={p.id} className="rounded-xl border bg-white p-4">
+                    <p className="text-sm text-gray-900 line-clamp-3 whitespace-pre-wrap">{p.text}</p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-600">
+                      <span>{new Date(p.created_at).toLocaleString()}</span>
+                      {p.location ? (
+                        <>
+                          <span>•</span>
+                          <span className="rounded-full bg-gray-100 px-2 py-1">{p.location}</span>
+                        </>
+                      ) : null}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        ) : null}
 
         {/* Rejected */}
         {rejected ? (

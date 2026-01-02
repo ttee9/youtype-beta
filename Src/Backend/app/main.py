@@ -29,8 +29,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- In-memory store (MVP). Replace with Postgres later.
-POSTS: List[Dict[str, Any]] = []
+# NOTE: We persist posts to SQLite. Avoid relying on in-memory state for anything
+# you want to survive server restarts.
 
 
 @app.on_event("startup")
@@ -52,6 +52,18 @@ class Example(BaseModel):
 class TrendPoint(BaseModel):
     date: str  # YYYY-MM-DD
     count: int
+
+
+class PostOut(BaseModel):
+    id: str
+    text: str
+    location: Optional[str] = None
+    created_at: str
+
+
+class PostsResponse(BaseModel):
+    count: int
+    posts: List[PostOut]
 
 
 class AllowedResponse(BaseModel):
@@ -118,10 +130,26 @@ def health():
     return {"ok": True}
 
 @app.get("/posts")
-def get_posts():
+def get_posts() -> PostsResponse:
     """Return all stored posts (persisted)."""
     posts = fetch_posts(limit=500)
     return {"count": len(posts), "posts": posts}
+
+
+@app.get("/posts/{post_id}")
+def get_post(post_id: str):
+    posts = fetch_posts(limit=500)
+    for p in posts:
+        if p["id"] == post_id:
+            return p
+    return {"error": "not_found"}
+
+
+@app.delete("/posts/{post_id}")
+def delete_post(post_id: str):
+    # Minimal MVP: we don't implement delete at DB layer yet.
+    # (We'll add it when needed; leaving endpoint stubbed avoids breaking clients.)
+    return {"ok": False, "error": "not_implemented"}
 
 @app.post("/submit", response_model=Union[AllowedResponse, RejectedResponse])
 def submit(payload: SubmitRequest):
@@ -150,20 +178,19 @@ def submit(payload: SubmitRequest):
     # Persist to SQLite
     insert_post(post=record)
 
-    # Optional: keep in-memory behavior for similarity in this request
-    POSTS.append(record)
-
     # 3) "Similarity" (MVP): Jaccard on tokens
     query_embedding = record["embedding"]
     threshold = 0.78  # good starting point
 
     scored = []
 
-    for p in POSTS:
+    # Compare against persisted history (so similarity survives restarts)
+    history = fetch_posts(limit=500)
+    for p in history:
         if p["id"] == record["id"]:
             continue  # don't compare the post to itself
 
-        sim = cosine_similarity(query_embedding, p["embedding"])
+        sim = cosine_similarity(query_embedding, p.get("embedding") or [])
         print("sim:", sim, "text:", p["text"][:50])
 
         if sim >= threshold:
