@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const USE_MOCK = false;
 const API_BASE = "http://localhost:8000";
@@ -74,12 +74,42 @@ function mockResponse(): SubmitResponse {
 function fmtInt(n: number) {
   return new Intl.NumberFormat().format(n);
 }
-function clamp01(x: number) {
-  return Math.max(0, Math.min(1, x));
-}
-function formatShortDate(isoDate: string) {
-  const d = new Date(`${isoDate}T00:00:00`);
-  return d.toLocaleDateString(undefined, { month: "short", day: "2-digit" });
+
+function useCountUp(target: number, opts?: { durationMs?: number }) {
+  const durationMs = opts?.durationMs ?? 900;
+  const [value, setValue] = useState(() => (target > 0 ? Math.floor(target) : 0));
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+
+    if (!Number.isFinite(target) || target <= 0) {
+      // Defer state update to avoid sync setState inside effect
+      rafRef.current = requestAnimationFrame(() => setValue(0));
+      return;
+    }
+
+    const start = performance.now();
+    const from = 0;
+    const to = Math.floor(target);
+
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / durationMs);
+      // Ease-out cubic
+      const eased = 1 - Math.pow(1 - t, 3);
+      const next = Math.round(from + (to - from) * eased);
+      setValue(next);
+      if (t < 1) rafRef.current = requestAnimationFrame(tick);
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [target, durationMs]);
+
+  return value;
 }
 
 export default function Page() {
@@ -181,10 +211,9 @@ export default function Page() {
   const allowed = result && result.status === "allowed" ? result : null;
   const rejected = result && result.status === "rejected" ? result : null;
 
-  const trendMax = useMemo(() => {
-    if (!allowed) return 1;
-    return Math.max(1, ...allowed.trend_7d.map((t) => t.count));
-  }, [allowed]);
+  const bigCount = useCountUp(allowed?.similar_count ?? 0, { durationMs: 1100 });
+
+  // (UI simplified): we no longer render trend/phrases/examples in this minimal count view.
 
   return (
     <main className="min-h-screen bg-gray-50 text-gray-900">
@@ -241,6 +270,39 @@ export default function Page() {
           ) : null}
         </section>
 
+        {/* Rejected */}
+        {rejected ? (
+          <section className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 p-5">
+            <h2 className="text-base font-semibold text-rose-900">Submission rejected</h2>
+            <p className="mt-2 text-sm text-rose-800">{rejected.reason}</p>
+            {rejected.policy_category ? (
+              <p className="mt-1 text-xs text-rose-700">Category: {rejected.policy_category}</p>
+            ) : null}
+          </section>
+        ) : null}
+
+        {/* Allowed */}
+        {allowed ? (
+          <section className="mt-6 rounded-2xl border bg-white p-8 shadow-sm">
+            <div className="text-center">
+              <div className="text-sm font-semibold uppercase tracking-wide text-gray-500">Similar posts</div>
+              <div className="mt-3 text-6xl md:text-7xl font-extrabold tracking-tight text-indigo-700 tabular-nums">
+                {fmtInt(bigCount)}
+              </div>
+              <div className="mt-2 text-sm text-gray-600">Counted from your saved history.</div>
+            </div>
+          </section>
+        ) : (
+          <section className="mt-6 rounded-2xl border bg-white p-5 text-sm text-gray-700 shadow-sm">
+            <h2 className="text-base font-semibold text-gray-900">How it works</h2>
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+              <li>Post stores text</li>
+              <li>Backend checks quality + moderation</li>
+              <li>Analyze shows how many similar posts exist</li>
+            </ul>
+          </section>
+        )}
+
         {/* Persisted submissions */}
         {!USE_MOCK ? (
           <section className="mt-6 rounded-2xl border bg-white p-5 shadow-sm">
@@ -277,107 +339,6 @@ export default function Page() {
             )}
           </section>
         ) : null}
-
-        {/* Rejected */}
-        {rejected ? (
-          <section className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 p-5">
-            <h2 className="text-base font-semibold text-rose-900">Submission rejected</h2>
-            <p className="mt-2 text-sm text-rose-800">{rejected.reason}</p>
-            {rejected.policy_category ? (
-              <p className="mt-1 text-xs text-rose-700">Category: {rejected.policy_category}</p>
-            ) : null}
-          </section>
-        ) : null}
-
-        {/* Allowed */}
-        {allowed ? (
-          <section className="mt-6 space-y-5">
-            {/* Summary */}
-            <div className="rounded-2xl border bg-white p-5 shadow-sm">
-              <h2 className="text-xl md:text-2xl font-bold">{allowed.theme_label ?? "Semantic theme"}</h2>
-
-              <div className="mt-3 grid gap-3 md:grid-cols-3">
-                <div className="rounded-xl bg-gray-50 p-4">
-                  <div className="text-xs font-semibold text-gray-600">Similar posts</div>
-                  <div className="mt-1 text-2xl font-bold">{fmtInt(allowed.similar_count)}</div>
-                </div>
-
-                <div className="rounded-xl bg-gray-50 p-4">
-                  <div className="text-xs font-semibold text-gray-600">Threshold</div>
-                  <div className="mt-1 text-2xl font-bold">{allowed.similarity_threshold.toFixed(2)}</div>
-                </div>
-
-                <div className="rounded-xl bg-gray-50 p-4">
-                  <div className="text-xs font-semibold text-gray-600">Updated</div>
-                  <div className="mt-1 text-sm font-medium text-gray-800">{new Date().toLocaleString()}</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Trend + Phrases */}
-            <div className="grid gap-5 md:grid-cols-2">
-              <div className="rounded-2xl border bg-white p-5 shadow-sm">
-                <h3 className="text-sm font-semibold text-gray-900">Trend (last 7 days)</h3>
-                <div className="mt-3 space-y-2">
-                  {allowed.trend_7d.map((t) => {
-                    const w = `${Math.round(clamp01(t.count / trendMax) * 100)}%`;
-                    return (
-                      <div key={t.date} className="grid grid-cols-[64px_1fr_36px] items-center gap-3">
-                        <div className="text-xs text-gray-600">{formatShortDate(t.date)}</div>
-                        <div className="h-2 rounded-full bg-gray-100">
-                          <div className="h-2 rounded-full bg-indigo-500" style={{ width: w }} />
-                        </div>
-                        <div className="text-xs font-semibold text-gray-700 text-right">{t.count}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="rounded-2xl border bg-white p-5 shadow-sm">
-                <h3 className="text-sm font-semibold text-gray-900">Common phrasing</h3>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {allowed.common_phrases.slice(0, 12).map((p, i) => (
-                    <span
-                      key={`${p}-${i}`}
-                      className="rounded-full border bg-gray-50 px-3 py-1 text-sm text-gray-800"
-                    >
-                      {p}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Examples */}
-            <div className="rounded-2xl border bg-white p-5 shadow-sm">
-              <h3 className="text-sm font-semibold text-gray-900">Top matching examples</h3>
-              <div className="mt-3 space-y-3">
-                {allowed.examples.slice(0, 5).map((ex, idx) => (
-                  <article key={idx} className="rounded-xl border bg-white p-4">
-                    <p className="text-base leading-relaxed">{ex.text}</p>
-                    <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-600">
-                      <span className="rounded-full bg-indigo-50 px-2 py-1 text-indigo-700">
-                        similarity {ex.similarity.toFixed(2)}
-                      </span>
-                      <span>•</span>
-                      <span>{new Date(ex.created_at).toLocaleString()}</span>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </div>
-          </section>
-        ) : (
-          <section className="mt-6 rounded-2xl border bg-white p-5 text-sm text-gray-700 shadow-sm">
-            <h2 className="text-base font-semibold text-gray-900">How it works</h2>
-            <ul className="mt-2 list-disc space-y-1 pl-5">
-              <li>Submit text (and optional location)</li>
-              <li>Backend checks quality + moderation</li>
-              <li>You get similar posts, trend, common phrasing, and examples</li>
-            </ul>
-          </section>
-        )}
       </div>
     </main>
   );
