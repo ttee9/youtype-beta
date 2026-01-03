@@ -43,6 +43,11 @@ class SubmitRequest(BaseModel):
     location: Optional[str] = Field(default=None, max_length=200)
 
 
+class PostOnlyRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=5000)
+    location: Optional[str] = Field(default=None, max_length=200)
+
+
 class Example(BaseModel):
     text: str
     similarity: float
@@ -241,3 +246,27 @@ def submit(payload: SubmitRequest):
         common_phrases=common_phrases,
         examples=examples,
     )
+
+
+@app.post("/post")
+def post_only(payload: PostOnlyRequest):
+    """Persist text without embeddings/analysis (useful for simple posting)."""
+    reason = is_low_quality(payload.text)
+    if reason:
+        return {"status": "rejected", "reason": reason}
+
+    allowed, reason = moderate(payload.text)
+    if not allowed:
+        return {"status": "rejected", "reason": reason}
+
+    post_id = str(uuid4())
+    created_at = _now_utc().isoformat()
+    record = {
+        "id": post_id,
+        "text": payload.text.strip(),
+        "location": (payload.location or "").strip() or None,
+        "created_at": created_at,
+        "embedding": [],
+    }
+    insert_post(post=record)
+    return {"status": "ok", "id": post_id, "created_at": created_at}

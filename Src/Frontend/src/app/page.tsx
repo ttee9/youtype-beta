@@ -84,10 +84,11 @@ function formatShortDate(isoDate: string) {
 
 export default function Page() {
   const [text, setText] = useState("");
-  const [location, setLocation] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<"idle" | "posting" | "analyzing">("idle");
   const [result, setResult] = useState<SubmitResponse | null>(null);
   const [recent, setRecent] = useState<PostOut[]>([]);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function refreshRecent() {
     try {
@@ -103,16 +104,57 @@ export default function Page() {
     if (!USE_MOCK) refreshRecent();
   }, []);
 
-  const canAnalyze = useMemo(() => text.trim().length >= 10 && !loading, [text, loading]);
+  const canPost = useMemo(() => text.trim().length >= 5 && loading === "idle", [text, loading]);
+  const canAnalyze = useMemo(() => text.trim().length >= 10 && loading === "idle", [text, loading]);
+
+  async function onPost() {
+    setNotice(null);
+    setError(null);
+    setResult(null);
+    setLoading("posting");
+
+    if (USE_MOCK) {
+      await new Promise((res) => setTimeout(res, 150));
+      setNotice("Saved (mock). ");
+      setLoading("idle");
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/post`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: text.trim() }),
+      });
+      const data = await res.json();
+
+      if (data?.status === "rejected") {
+        setError(data?.reason ?? "Rejected");
+      } else if (data?.status === "ok") {
+        setNotice("Posted successfully.");
+        setText("");
+        await refreshRecent();
+      } else {
+        setError("Unexpected response from server.");
+      }
+    } catch (err) {
+      console.error(err);
+      setError("Couldn’t reach backend. Is it running on :8000?");
+    } finally {
+      setLoading("idle");
+    }
+  }
 
   async function onAnalyze() {
-    setLoading(true);
+    setNotice(null);
+    setError(null);
+    setLoading("analyzing");
     setResult(null);
 
     if (USE_MOCK) {
       await new Promise((res) => setTimeout(res, 200));
       setResult(mockResponse());
-      setLoading(false);
+      setLoading("idle");
       return;
     }
 
@@ -122,7 +164,6 @@ export default function Page() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: text.trim(),
-          location: location.trim() || undefined,
         }),
       });
 
@@ -131,8 +172,9 @@ export default function Page() {
       await refreshRecent();
     } catch (err) {
       console.error(err);
+      setError("Couldn’t reach backend. Is it running on :8000?");
     } finally {
-      setLoading(false);
+      setLoading("idle");
     }
   }
 
@@ -149,9 +191,7 @@ export default function Page() {
       <div className="mx-auto max-w-3xl px-4 py-10 md:px-8">
         <header className="mb-8">
           <h1 className="text-3xl md:text-4xl font-bold tracking-tight">Semantic Theme</h1>
-          <p className="mt-2 text-base text-gray-700">
-            Paste a post idea and see similar posts, a 7‑day trend, and common phrasing.
-          </p>
+          <p className="mt-2 text-base text-gray-700">Upload text, then either post it or analyze it.</p>
           <div className="mt-3 text-sm text-gray-600">
             Mode: <span className="font-medium">{USE_MOCK ? "Mock data" : "Live backend"}</span>
           </div>
@@ -159,7 +199,7 @@ export default function Page() {
 
         {/* Input */}
         <section className="rounded-2xl border bg-white p-5 shadow-sm">
-          <label className="block text-sm font-semibold text-gray-900">Text</label>
+          <label className="block text-sm font-semibold text-gray-900">Upload text</label>
           <textarea
             className="mt-2 w-full resize-none rounded-xl border bg-white p-4 text-base leading-relaxed outline-none focus:ring-2 focus:ring-indigo-200"
             rows={6}
@@ -168,28 +208,37 @@ export default function Page() {
             onChange={(e) => setText(e.target.value)}
           />
 
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <div className="md:col-span-2">
-              <label className="block text-sm font-semibold text-gray-900">Location (optional)</label>
-              <input
-                className="mt-2 w-full rounded-xl border bg-white p-3 text-base outline-none focus:ring-2 focus:ring-indigo-200"
-                placeholder="e.g., New York City"
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-              />
-              <p className="mt-2 text-xs text-gray-500">Keep it short; use a city/area name.</p>
-            </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <button
+              className="w-full rounded-xl border bg-white px-4 py-3 text-base font-semibold text-gray-900 shadow-sm transition hover:bg-gray-50 disabled:opacity-50"
+              onClick={onPost}
+              disabled={!canPost}
+              type="button"
+            >
+              {loading === "posting" ? "Posting…" : "Post"}
+            </button>
 
-            <div className="flex items-end">
-              <button
-                className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:opacity-50"
-                onClick={onAnalyze}
-                disabled={!canAnalyze}
-              >
-                {loading ? "Analyzing…" : "Analyze"}
-              </button>
-            </div>
+            <button
+              className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:opacity-50"
+              onClick={onAnalyze}
+              disabled={!canAnalyze}
+              type="button"
+            >
+              {loading === "analyzing" ? "Analyzing…" : "Analyze"}
+            </button>
           </div>
+
+          {notice ? (
+            <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+              {notice}
+            </div>
+          ) : null}
+
+          {error ? (
+            <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
+              {error}
+            </div>
+          ) : null}
         </section>
 
         {/* Persisted submissions */}
