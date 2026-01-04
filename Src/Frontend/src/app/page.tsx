@@ -216,11 +216,15 @@ export default function Page() {
       <div className="mx-auto max-w-3xl px-4 py-10 md:px-8">
         {/* Input */}
   <section className="rounded-3xl border border-gray-400 bg-white/80 p-6 shadow-sm backdrop-blur">
-          <label className="block text-sm font-semibold text-gray-900">Upload text</label>
+          <div className="text-base font-extrabold tracking-tight text-gray-950">YouType</div>
           <textarea
             className="mt-2 w-full resize-none rounded-2xl border border-gray-400 bg-white/90 p-4 text-base leading-relaxed shadow-sm outline-none focus:ring-2 focus:ring-indigo-200"
             rows={6}
-            placeholder="e.g., Rent in NYC is getting out of control…"
+            placeholder={`Paste your text here.
+
+Then click:
+• Post — save it
+• Analyze — count similar posts`}
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
