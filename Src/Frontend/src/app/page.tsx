@@ -19,18 +19,6 @@ type SubmitResponse =
     }
   | { status: "rejected"; reason: string; policy_category?: string };
 
-type PostOut = {
-  id: string;
-  text: string;
-  location?: string | null;
-  created_at: string;
-};
-
-type PostsResponse = {
-  count: number;
-  posts: PostOut[];
-};
-
 function mockResponse(): SubmitResponse {
   const now = new Date();
   const days = Array.from({ length: 7 }).map((_, i) => {
@@ -116,28 +104,28 @@ export default function Page() {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState<"idle" | "posting" | "analyzing">("idle");
   const [result, setResult] = useState<SubmitResponse | null>(null);
-  const [recent, setRecent] = useState<PostOut[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function refreshRecent() {
-    try {
-      const res = await fetch(`${API_BASE}/posts`, { cache: "no-store" });
-      const data = (await res.json()) as PostsResponse;
-      setRecent(Array.isArray(data.posts) ? data.posts : []);
-    } catch {
-      // ignore; backend might not be running yet
-    }
-  }
-
   useEffect(() => {
-    if (!USE_MOCK) refreshRecent();
+    // no-op for now
   }, []);
 
   const canPost = useMemo(() => text.trim().length >= 5 && loading === "idle", [text, loading]);
   const canAnalyze = useMemo(() => text.trim().length >= 10 && loading === "idle", [text, loading]);
 
   async function onPost() {
+    if (!canPost) {
+      setNotice(null);
+      setResult(null);
+      if (text.trim().length < 5) {
+        setError("Please enter at least 5 characters to post.");
+      } else {
+        setError("Please wait—an action is already in progress.");
+      }
+      return;
+    }
+
     setNotice(null);
     setError(null);
     setResult(null);
@@ -163,7 +151,6 @@ export default function Page() {
       } else if (data?.status === "ok") {
         setNotice("Posted successfully.");
         setText("");
-        await refreshRecent();
       } else {
         setError("Unexpected response from server.");
       }
@@ -176,6 +163,16 @@ export default function Page() {
   }
 
   async function onAnalyze() {
+    if (!canAnalyze) {
+      setNotice(null);
+      if (text.trim().length < 10) {
+        setError("Please enter at least 10 characters to analyze.");
+      } else {
+        setError("Please wait—an action is already in progress.");
+      }
+      return;
+    }
+
     setNotice(null);
     setError(null);
     setLoading("analyzing");
@@ -199,7 +196,6 @@ export default function Page() {
 
       const data = await res.json();
       setResult(data);
-      await refreshRecent();
     } catch (err) {
       console.error(err);
       setError("Couldn’t reach backend. Is it running on :8000?");
@@ -216,21 +212,13 @@ export default function Page() {
   // (UI simplified): we no longer render trend/phrases/examples in this minimal count view.
 
   return (
-    <main className="min-h-screen bg-gray-50 text-gray-900">
+    <main className="min-h-screen text-gray-900">
       <div className="mx-auto max-w-3xl px-4 py-10 md:px-8">
-        <header className="mb-8">
-          <h1 className="text-3xl md:text-4xl font-bold tracking-tight">Semantic Theme</h1>
-          <p className="mt-2 text-base text-gray-700">Upload text, then either post it or analyze it.</p>
-          <div className="mt-3 text-sm text-gray-600">
-            Mode: <span className="font-medium">{USE_MOCK ? "Mock data" : "Live backend"}</span>
-          </div>
-        </header>
-
         {/* Input */}
-        <section className="rounded-2xl border bg-white p-5 shadow-sm">
+  <section className="rounded-3xl border border-gray-400 bg-white/80 p-6 shadow-sm backdrop-blur">
           <label className="block text-sm font-semibold text-gray-900">Upload text</label>
           <textarea
-            className="mt-2 w-full resize-none rounded-xl border bg-white p-4 text-base leading-relaxed outline-none focus:ring-2 focus:ring-indigo-200"
+            className="mt-2 w-full resize-none rounded-2xl border border-gray-400 bg-white/90 p-4 text-base leading-relaxed shadow-sm outline-none focus:ring-2 focus:ring-indigo-200"
             rows={6}
             placeholder="e.g., Rent in NYC is getting out of control…"
             value={text}
@@ -239,18 +227,20 @@ export default function Page() {
 
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <button
-              className="w-full rounded-xl border bg-white px-4 py-3 text-base font-semibold text-gray-900 shadow-sm transition hover:bg-gray-50 disabled:opacity-50"
+              className="w-full rounded-2xl border border-gray-400 bg-white px-4 py-3 text-base font-semibold text-gray-950 shadow-sm transition hover:bg-gray-50 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:shadow-none data-[disabled=true]:border-gray-300"
               onClick={onPost}
-              disabled={!canPost}
+              aria-disabled={!canPost}
+              data-disabled={!canPost ? "true" : "false"}
               type="button"
             >
               {loading === "posting" ? "Posting…" : "Post"}
             </button>
 
             <button
-              className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:opacity-50"
+              className="w-full rounded-2xl bg-indigo-700 px-4 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-indigo-800 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:shadow-none data-[disabled=true]:bg-indigo-700"
               onClick={onAnalyze}
-              disabled={!canAnalyze}
+              aria-disabled={!canAnalyze}
+              data-disabled={!canAnalyze ? "true" : "false"}
               type="button"
             >
               {loading === "analyzing" ? "Analyzing…" : "Analyze"}
@@ -289,54 +279,7 @@ export default function Page() {
               <div className="mt-3 text-6xl md:text-7xl font-extrabold tracking-tight text-indigo-700 tabular-nums">
                 {fmtInt(bigCount)}
               </div>
-              <div className="mt-2 text-sm text-gray-600">Counted from your saved history.</div>
             </div>
-          </section>
-        ) : (
-          <section className="mt-6 rounded-2xl border bg-white p-5 text-sm text-gray-700 shadow-sm">
-            <h2 className="text-base font-semibold text-gray-900">How it works</h2>
-            <ul className="mt-2 list-disc space-y-1 pl-5">
-              <li>Post stores text</li>
-              <li>Backend checks quality + moderation</li>
-              <li>Analyze shows how many similar posts exist</li>
-            </ul>
-          </section>
-        )}
-
-        {/* Persisted submissions */}
-        {!USE_MOCK ? (
-          <section className="mt-6 rounded-2xl border bg-white p-5 shadow-sm">
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-semibold text-gray-900">Recent submissions</h2>
-              <button
-                className="rounded-lg border bg-gray-50 px-3 py-1 text-sm text-gray-700 hover:bg-gray-100"
-                onClick={refreshRecent}
-                type="button"
-              >
-                Refresh
-              </button>
-            </div>
-
-            {recent.length === 0 ? (
-              <p className="mt-3 text-sm text-gray-600">No saved posts yet (or backend isn’t running).</p>
-            ) : (
-              <div className="mt-3 space-y-3">
-                {recent.slice(0, 8).map((p) => (
-                  <article key={p.id} className="rounded-xl border bg-white p-4">
-                    <p className="text-sm text-gray-900 line-clamp-3 whitespace-pre-wrap">{p.text}</p>
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-600">
-                      <span>{new Date(p.created_at).toLocaleString()}</span>
-                      {p.location ? (
-                        <>
-                          <span>•</span>
-                          <span className="rounded-full bg-gray-100 px-2 py-1">{p.location}</span>
-                        </>
-                      ) : null}
-                    </div>
-                  </article>
-                ))}
-              </div>
-            )}
           </section>
         ) : null}
       </div>

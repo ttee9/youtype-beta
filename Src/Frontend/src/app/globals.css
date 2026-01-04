@@ -21,8 +21,9 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    /* Keep the app light-themed for now (avoid unexpected black background). */
+    --background: #ffffff;
+    --foreground: #0f172a;
   }
 }
 
@@ -33,7 +34,10 @@ html {
 }
 
 body {
-  background: var(--background);
+  /* Soft, modern background (no dark mode flip) */
+  background: radial-gradient(1200px 600px at 20% 0%, #eef2ff 0%, rgba(238,242,255,0) 55%),
+              radial-gradient(900px 500px at 100% 20%, #ecfeff 0%, rgba(236,254,255,0) 45%),
+              var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
   line-height: 1.6;
@@ -66,12 +70,7 @@ button {
   cursor: pointer;
 }
 
-/* Slightly tighten very wide content for better line length */
-main {
-  max-width: 44rem; /* ~704px for comfortable reading */
-  margin-left: auto;
-  margin-right: auto;
-}
+/* Let pages control their own layout widths. */
 
 /* Fallback/force for any compiled classes that might not use the vars */
 .text-gray-500 { color: #4b5563 !important; }
