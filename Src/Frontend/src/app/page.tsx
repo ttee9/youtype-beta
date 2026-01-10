@@ -11,6 +11,7 @@ type SubmitResponse =
   | {
       status: "allowed";
       theme_label?: string;
+      submitted_post: { id: string; text: string; created_at: string; similarity: number };
       similar_count: number;
       similarity_threshold: number;
       trend_7d: TrendPoint[];
@@ -30,6 +31,12 @@ function mockResponse(): SubmitResponse {
   return {
     status: "allowed",
     theme_label: "High rent in New York City",
+    submitted_post: {
+      id: "mock",
+      text: "(mock) submitted text",
+      created_at: new Date().toISOString(),
+      similarity: 1.0,
+    },
     similar_count: 3421,
     similarity_threshold: 0.82,
     trend_7d: days,
@@ -276,8 +283,25 @@ export default function Page() {
 
   const bigCount = useCountUp(allowed?.similar_count ?? 0, { durationMs: 1100 });
 
+  const displayExamples = useMemo<Array<{ text: string; similarity: number; created_at: string }>>(() => {
+    if (!allowed) return [];
+    const base = Array.isArray(allowed.examples) ? allowed.examples : [];
+    const submitted = allowed.submitted_post
+      ? [
+          {
+            text: allowed.submitted_post.text,
+            similarity: allowed.submitted_post.similarity,
+            created_at: allowed.submitted_post.created_at,
+          },
+        ]
+      : [];
+
+    // Put the submitted post first so it reliably appears in both lists.
+    return [...submitted, ...base];
+  }, [allowed]);
+
   const mostSimilarGroups = useMemo(() => {
-    if (!allowed?.examples?.length) return [];
+    if (!displayExamples.length) return [];
 
     const norm = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
     const byKey = new Map<
@@ -290,7 +314,7 @@ export default function Page() {
       }
     >();
 
-    for (const ex of allowed.examples) {
+    for (const ex of displayExamples) {
       const key = norm(ex.text);
       const prev = byKey.get(key);
       if (!prev) {
@@ -319,11 +343,11 @@ export default function Page() {
         return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
       })
       .slice(0, 5);
-  }, [allowed]);
+  }, [displayExamples]);
 
   const mostRecentExamples = useMemo(() => {
-    if (!allowed?.examples?.length) return [];
-    return [...allowed.examples]
+    if (!displayExamples.length) return [];
+    return [...displayExamples]
       .sort((a, b) => {
         const ta = new Date(a.created_at).getTime();
         const tb = new Date(b.created_at).getTime();
@@ -332,36 +356,36 @@ export default function Page() {
         return nb - na;
       })
       .slice(0, 5);
-  }, [allowed]);
+  }, [displayExamples]);
 
   // (UI simplified): we no longer render trend/phrases/examples in this minimal count view.
 
   return (
     <main className="min-h-screen text-gray-900">
-      <div className="mx-auto max-w-3xl px-4 py-10 md:px-8">
+      <div className="mx-auto max-w-3xl px-4 py-2 md:px-8">
         {/* Input */}
-  <section className="rounded-3xl border border-gray-400 bg-white/80 p-6 shadow-sm backdrop-blur">
+  <section className="rounded-3xl border border-gray-400 bg-white/80 p-5 shadow-sm backdrop-blur">
           <div className="text-base font-extrabold tracking-tight text-gray-950">YouType</div>
           <textarea
-            className="mt-2 w-full resize-none rounded-2xl border border-gray-400 bg-white/90 p-4 text-base leading-relaxed shadow-sm outline-none focus:ring-2 focus:ring-indigo-200"
+            className="mt-1.5 w-full resize-none rounded-2xl border border-gray-400 bg-white/90 p-4 text-base leading-relaxed shadow-sm outline-none focus:ring-2 focus:ring-indigo-200"
             rows={6}
             placeholder={`Paste your text here.
 
 Then click:
-• Post — save it
-• Analyze — count similar posts`}
+• Type — save it
+• Analyze — count similar texts`}
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
 
           <button
-            className="mt-4 w-full rounded-2xl bg-gray-900 px-4 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-black data-[disabled=true]:cursor-not-allowed data-[disabled=true]:shadow-none data-[disabled=true]:bg-gray-900"
+            className="mt-4 w-full rounded-2xl border border-gray-400 bg-white px-4 py-3 text-base font-semibold text-gray-950 shadow-sm transition hover:bg-gray-50 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:shadow-none data-[disabled=true]:border-gray-300"
             onClick={onTypeAndAnalyze}
             aria-disabled={!canTypeAndAnalyze}
             data-disabled={!canTypeAndAnalyze ? "true" : "false"}
             type="button"
           >
-            {loading === "posting" || loading === "analyzing" ? "Working…" : "Type + Analyze"}
+            {loading === "posting" || loading === "analyzing" ? "Working…" : "Type and Analyze"}
           </button>
 
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -376,7 +400,7 @@ Then click:
             </button>
 
             <button
-              className="w-full rounded-2xl bg-indigo-700 px-4 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-indigo-800 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:shadow-none data-[disabled=true]:bg-indigo-700"
+              className="w-full rounded-2xl border border-gray-400 bg-white px-4 py-3 text-base font-semibold text-gray-950 shadow-sm transition hover:bg-gray-50 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:shadow-none data-[disabled=true]:border-gray-300"
               onClick={onAnalyze}
               aria-disabled={!canAnalyze}
               data-disabled={!canAnalyze ? "true" : "false"}
@@ -414,7 +438,7 @@ Then click:
         {allowed ? (
           <section className="mt-6 rounded-2xl border bg-white p-8 shadow-sm">
             <div className="text-center">
-              <div className="text-sm font-semibold uppercase tracking-wide text-gray-500">Total Similar Posts</div>
+              <div className="text-sm font-semibold uppercase tracking-wide text-gray-500">Total Similar Texts</div>
               <div className="mt-3 text-6xl md:text-7xl font-extrabold tracking-tight text-indigo-700 tabular-nums">
                 {fmtInt(bigCount)}
               </div>
@@ -425,7 +449,7 @@ Then click:
         {allowed ? (
           <section className="mt-4 rounded-2xl border bg-white p-6 shadow-sm">
             <div className="text-sm font-semibold uppercase tracking-wide text-gray-500">
-              Most Similar Posts
+              Most Similar Texts
             </div>
 
             {mostSimilarGroups.length ? (
@@ -455,7 +479,7 @@ Then click:
         {mostRecentExamples.length ? (
           <section className="mt-4 rounded-2xl border bg-white p-6 shadow-sm">
             <div className="text-sm font-semibold uppercase tracking-wide text-gray-500">
-              Recent Similar Posts
+              Recent Similar Texts
             </div>
             <div className="mt-3 space-y-3">
               {mostRecentExamples.map((ex, idx) => {

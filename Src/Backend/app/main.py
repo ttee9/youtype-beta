@@ -71,9 +71,18 @@ class PostsResponse(BaseModel):
     posts: List[PostOut]
 
 
+class SubmittedPost(BaseModel):
+    """The post created by this /submit call."""
+    id: str
+    text: str
+    created_at: str
+    similarity: float = 1.0
+
+
 class AllowedResponse(BaseModel):
     status: Literal["allowed"] = "allowed"
     theme_label: Optional[str] = None
+    submitted_post: SubmittedPost
     similar_count: int
     similarity_threshold: float
     trend_7d: List[TrendPoint]
@@ -240,6 +249,12 @@ def submit(payload: SubmitRequest):
 
     return AllowedResponse(
         theme_label=theme_label,
+        submitted_post=SubmittedPost(
+            id=record["id"],
+            text=record["text"],
+            created_at=record["created_at"],
+            similarity=1.0,
+        ),
         similar_count=len(scored),
         similarity_threshold=threshold,
         trend_7d=trend,
