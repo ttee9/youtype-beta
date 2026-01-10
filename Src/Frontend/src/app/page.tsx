@@ -286,6 +286,34 @@ Then click:
             </div>
           </section>
         ) : null}
+
+        {allowed && allowed.examples?.length ? (
+          <section className="mt-4 rounded-2xl border bg-white p-6 shadow-sm">
+            <div className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+              Similar recent posts
+            </div>
+            <div className="mt-3 space-y-3">
+              {allowed.examples.slice(0, 5).map((ex, idx) => {
+                const when = new Date(ex.created_at);
+                const whenLabel = Number.isFinite(when.getTime()) ? when.toLocaleString() : ex.created_at;
+
+                return (
+                  <div
+                    key={`${ex.created_at}-${idx}`}
+                    className="rounded-2xl border border-gray-200 bg-white/80 p-4"
+                  >
+                    <div className="text-sm text-gray-900 whitespace-pre-wrap wrap-break-word">{ex.text}</div>
+                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
+                      <span>{whenLabel}</span>
+                      <span aria-hidden="true">•</span>
+                      <span>Similarity: {ex.similarity}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
       </div>
     </main>
   );
