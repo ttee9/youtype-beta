@@ -113,6 +113,10 @@ export default function Page() {
 
   const canPost = useMemo(() => text.trim().length >= 5 && loading === "idle", [text, loading]);
   const canAnalyze = useMemo(() => text.trim().length >= 10 && loading === "idle", [text, loading]);
+  const canTypeAndAnalyze = useMemo(
+    () => text.trim().length >= 10 && loading === "idle",
+    [text, loading]
+  );
 
   async function onPost() {
     if (!canPost) {
@@ -204,10 +208,131 @@ export default function Page() {
     }
   }
 
+  async function onTypeAndAnalyze() {
+    if (!canTypeAndAnalyze) {
+      setNotice(null);
+      if (text.trim().length < 10) {
+        setError("Please enter at least 10 characters to analyze.");
+      } else {
+        setError("Please wait—an action is already in progress.");
+      }
+      return;
+    }
+
+    setNotice(null);
+    setError(null);
+    setResult(null);
+    setLoading("posting");
+
+    const payload = { text: text.trim() };
+
+    if (USE_MOCK) {
+      await new Promise((res) => setTimeout(res, 250));
+      setResult(mockResponse());
+      setText("");
+      setLoading("idle");
+      return;
+    }
+
+    try {
+      // 1) Type (persist)
+      const postRes = await fetch(`${API_BASE}/post`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const postData = await postRes.json();
+
+      if (postData?.status === "rejected") {
+        setError(postData?.reason ?? "Rejected");
+        return;
+      }
+      if (postData?.status !== "ok") {
+        setError("Unexpected response from server.");
+        return;
+      }
+
+      // 2) Analyze (counts + examples)
+      setLoading("analyzing");
+      const analyzeRes = await fetch(`${API_BASE}/submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const analyzeData = await analyzeRes.json();
+      setResult(analyzeData);
+      setText("");
+    } catch (err) {
+      console.error(err);
+      setError("Couldn’t reach backend. Is it running on :8000?");
+    } finally {
+      setLoading("idle");
+    }
+  }
+
   const allowed = result && result.status === "allowed" ? result : null;
   const rejected = result && result.status === "rejected" ? result : null;
 
   const bigCount = useCountUp(allowed?.similar_count ?? 0, { durationMs: 1100 });
+
+  const mostSimilarGroups = useMemo(() => {
+    if (!allowed?.examples?.length) return [];
+
+    const norm = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
+    const byKey = new Map<
+      string,
+      {
+        text: string;
+        duplicates: number;
+        bestSimilarity: number;
+        bestCreatedAt: string;
+      }
+    >();
+
+    for (const ex of allowed.examples) {
+      const key = norm(ex.text);
+      const prev = byKey.get(key);
+      if (!prev) {
+        byKey.set(key, {
+          text: ex.text,
+          duplicates: 1,
+          bestSimilarity: ex.similarity ?? 0,
+          bestCreatedAt: ex.created_at,
+        });
+        continue;
+      }
+
+      prev.duplicates += 1;
+      if ((ex.similarity ?? 0) > prev.bestSimilarity) {
+        prev.bestSimilarity = ex.similarity ?? 0;
+        prev.bestCreatedAt = ex.created_at;
+      }
+    }
+
+    // Show the "best" groups first
+    return [...byKey.values()]
+      .sort((a, b) => {
+        if (b.bestSimilarity !== a.bestSimilarity) return b.bestSimilarity - a.bestSimilarity;
+        const ta = new Date(a.bestCreatedAt).getTime();
+        const tb = new Date(b.bestCreatedAt).getTime();
+        return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+      })
+      .slice(0, 5);
+  }, [allowed]);
+
+  const mostRecentExamples = useMemo(() => {
+    if (!allowed?.examples?.length) return [];
+    return [...allowed.examples]
+      .sort((a, b) => {
+        const ta = new Date(a.created_at).getTime();
+        const tb = new Date(b.created_at).getTime();
+        const na = Number.isFinite(ta) ? ta : 0;
+        const nb = Number.isFinite(tb) ? tb : 0;
+        return nb - na;
+      })
+      .slice(0, 5);
+  }, [allowed]);
 
   // (UI simplified): we no longer render trend/phrases/examples in this minimal count view.
 
@@ -229,7 +354,17 @@ Then click:
             onChange={(e) => setText(e.target.value)}
           />
 
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <button
+            className="mt-4 w-full rounded-2xl bg-gray-900 px-4 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-black data-[disabled=true]:cursor-not-allowed data-[disabled=true]:shadow-none data-[disabled=true]:bg-gray-900"
+            onClick={onTypeAndAnalyze}
+            aria-disabled={!canTypeAndAnalyze}
+            data-disabled={!canTypeAndAnalyze ? "true" : "false"}
+            type="button"
+          >
+            {loading === "posting" || loading === "analyzing" ? "Working…" : "Type + Analyze"}
+          </button>
+
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
             <button
               className="w-full rounded-2xl border border-gray-400 bg-white px-4 py-3 text-base font-semibold text-gray-950 shadow-sm transition hover:bg-gray-50 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:shadow-none data-[disabled=true]:border-gray-300"
               onClick={onPost}
@@ -237,7 +372,7 @@ Then click:
               data-disabled={!canPost ? "true" : "false"}
               type="button"
             >
-              {loading === "posting" ? "Posting…" : "Post"}
+              {loading === "posting" ? "Typing…" : "Type"}
             </button>
 
             <button
@@ -287,22 +422,43 @@ Then click:
           </section>
         ) : null}
 
-        {allowed && allowed.examples?.length ? (
+        {allowed ? (
           <section className="mt-4 rounded-2xl border bg-white p-6 shadow-sm">
             <div className="text-sm font-semibold uppercase tracking-wide text-gray-500">
-              Recent similar posts
+              Most Similar Posts
+            </div>
+
+            {mostSimilarGroups.length ? (
+              <div className="mt-3 space-y-3">
+                {mostSimilarGroups.map((g, idx) => {
+                  return (
+                    <div
+                      key={`${g.text}-${idx}`}
+                      className="rounded-2xl border border-gray-200 bg-white/80 p-4"
+                    >
+                      <div className="text-sm text-gray-900 whitespace-pre-wrap wrap-break-word">{g.text}</div>
+                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
+                        <span>Similarity: {g.bestSimilarity}</span>
+                        <span aria-hidden="true">•</span>
+                        <span>Duplicates: {fmtInt(g.duplicates)}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="mt-3 text-sm text-gray-500">No similar posts found yet.</div>
+            )}
+          </section>
+        ) : null}
+
+        {mostRecentExamples.length ? (
+          <section className="mt-4 rounded-2xl border bg-white p-6 shadow-sm">
+            <div className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+              Recent Similar Posts
             </div>
             <div className="mt-3 space-y-3">
-              {[...allowed.examples]
-                .sort((a, b) => {
-                  const ta = new Date(a.created_at).getTime();
-                  const tb = new Date(b.created_at).getTime();
-                  const na = Number.isFinite(ta) ? ta : 0;
-                  const nb = Number.isFinite(tb) ? tb : 0;
-                  return nb - na;
-                })
-                .slice(0, 5)
-                .map((ex, idx) => {
+              {mostRecentExamples.map((ex, idx) => {
                 const when = new Date(ex.created_at);
                 const whenLabel = Number.isFinite(when.getTime()) ? when.toLocaleString() : ex.created_at;
 
