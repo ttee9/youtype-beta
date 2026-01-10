@@ -290,10 +290,19 @@ Then click:
         {allowed && allowed.examples?.length ? (
           <section className="mt-4 rounded-2xl border bg-white p-6 shadow-sm">
             <div className="text-sm font-semibold uppercase tracking-wide text-gray-500">
-              Similar recent posts
+              Recent similar posts
             </div>
             <div className="mt-3 space-y-3">
-              {allowed.examples.slice(0, 5).map((ex, idx) => {
+              {[...allowed.examples]
+                .sort((a, b) => {
+                  const ta = new Date(a.created_at).getTime();
+                  const tb = new Date(b.created_at).getTime();
+                  const na = Number.isFinite(ta) ? ta : 0;
+                  const nb = Number.isFinite(tb) ? tb : 0;
+                  return nb - na;
+                })
+                .slice(0, 5)
+                .map((ex, idx) => {
                 const when = new Date(ex.created_at);
                 const whenLabel = Number.isFinite(when.getTime()) ? when.toLocaleString() : ex.created_at;
 
