@@ -439,7 +439,7 @@ Then click:
           <section className="mt-6 rounded-2xl border bg-white p-8 shadow-sm">
             <div className="text-center">
               <div className="text-sm font-semibold uppercase tracking-wide text-gray-500">Total Similar Texts</div>
-              <div className="mt-3 text-6xl md:text-7xl font-extrabold tracking-tight text-indigo-700 tabular-nums">
+              <div className="mt-3 text-6xl md:text-7xl font-extrabold tracking-tight text-gray-950 tabular-nums">
                 {fmtInt(bigCount)}
               </div>
             </div>
