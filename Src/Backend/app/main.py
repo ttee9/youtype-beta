@@ -245,7 +245,7 @@ def submit(payload: SubmitRequest):
         for sim, p in scored[:5]
     ]
 
-    theme_label = "Semantic theme (MVP)"  # You’ll replace this with LLM labeling later
+    theme_label = "Semantic theme (MVP)"  # You'll replace this with LLM labeling later
 
     return AllowedResponse(
         theme_label=theme_label,
@@ -255,7 +255,7 @@ def submit(payload: SubmitRequest):
             created_at=record["created_at"],
             similarity=1.0,
         ),
-        similar_count=len(scored),
+        similar_count=len(scored) + 1,  # Include the submitted post itself in the count
         similarity_threshold=threshold,
         trend_7d=trend,
         common_phrases=common_phrases,

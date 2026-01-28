@@ -365,7 +365,17 @@ export default function Page() {
       <div className="mx-auto max-w-3xl px-4 py-2 md:px-8">
         {/* Input */}
   <section className="rounded-3xl border border-gray-400 bg-white/80 p-5 shadow-sm backdrop-blur">
-          <div className="text-base font-extrabold tracking-tight text-gray-950">YouType</div>
+          <div className="flex items-center gap-3">
+            <div className="text-base font-extrabold tracking-tight text-gray-950">YouType</div>
+            <a
+              href="https://ko-fi.com/yourname"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-full border border-gray-400 bg-white px-3 py-1 text-sm font-semibold text-gray-950 shadow-sm transition hover:bg-gray-50 hover:shadow"
+            >
+              ☕ Donate
+            </a>
+          </div>
           <textarea
             className="mt-1.5 w-full resize-none rounded-2xl border border-gray-400 bg-white/90 p-4 text-base leading-relaxed shadow-sm outline-none focus:ring-2 focus:ring-indigo-200"
             rows={6}
