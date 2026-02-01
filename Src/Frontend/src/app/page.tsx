@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-const USE_MOCK = true;
+const USE_MOCK = false;
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 
 type TrendPoint = { date: string; count: number };
 
@@ -10,6 +11,7 @@ type SubmitResponse =
   | {
       status: "allowed";
       theme_label?: string;
+      submitted_post: { id: string; text: string; created_at: string; similarity: number };
       similar_count: number;
       similarity_threshold: number;
       trend_7d: TrendPoint[];
@@ -29,6 +31,12 @@ function mockResponse(): SubmitResponse {
   return {
     status: "allowed",
     theme_label: "High rent in New York City",
+    submitted_post: {
+      id: "mock",
+      text: "(mock) submitted text",
+      created_at: new Date().toISOString(),
+      similarity: 1.0,
+    },
     similar_count: 3421,
     similarity_threshold: 0.82,
     trend_7d: days,
@@ -61,40 +69,139 @@ function mockResponse(): SubmitResponse {
 function fmtInt(n: number) {
   return new Intl.NumberFormat().format(n);
 }
-function clamp01(x: number) {
-  return Math.max(0, Math.min(1, x));
-}
-function formatShortDate(isoDate: string) {
-  const d = new Date(`${isoDate}T00:00:00`);
-  return d.toLocaleDateString(undefined, { month: "short", day: "2-digit" });
+
+function useCountUp(target: number, opts?: { durationMs?: number }) {
+  const durationMs = opts?.durationMs ?? 900;
+  const [value, setValue] = useState(() => (target > 0 ? Math.floor(target) : 0));
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+
+    if (!Number.isFinite(target) || target <= 0) {
+      // Defer state update to avoid sync setState inside effect
+      rafRef.current = requestAnimationFrame(() => setValue(0));
+      return;
+    }
+
+    const start = performance.now();
+    const from = 0;
+    const to = Math.floor(target);
+
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / durationMs);
+      // Ease-out cubic
+      const eased = 1 - Math.pow(1 - t, 3);
+      const next = Math.round(from + (to - from) * eased);
+      setValue(next);
+      if (t < 1) rafRef.current = requestAnimationFrame(tick);
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [target, durationMs]);
+
+  return value;
 }
 
 export default function Page() {
   const [text, setText] = useState("");
-  const [location, setLocation] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<"idle" | "posting" | "analyzing">("idle");
   const [result, setResult] = useState<SubmitResponse | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const canAnalyze = useMemo(() => text.trim().length >= 10 && !loading, [text, loading]);
+  useEffect(() => {
+    // no-op for now
+  }, []);
+
+  const canPost = useMemo(() => text.trim().length >= 5 && loading === "idle", [text, loading]);
+  const canAnalyze = useMemo(() => text.trim().length >= 10 && loading === "idle", [text, loading]);
+  const canTypeAndAnalyze = useMemo(
+    () => text.trim().length >= 10 && loading === "idle",
+    [text, loading]
+  );
+
+  async function onPost() {
+    if (!canPost) {
+      setNotice(null);
+      setResult(null);
+      if (text.trim().length < 5) {
+        setError("Please enter at least 5 characters to post.");
+      } else {
+        setError("Please wait—an action is already in progress.");
+      }
+      return;
+    }
+
+    setNotice(null);
+    setError(null);
+    setResult(null);
+    setLoading("posting");
+
+    if (USE_MOCK) {
+      await new Promise((res) => setTimeout(res, 150));
+      setNotice("Saved (mock). ");
+      setLoading("idle");
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/post`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: text.trim() }),
+      });
+      const data = await res.json();
+
+      if (data?.status === "rejected") {
+        setError(data?.reason ?? "Rejected");
+      } else if (data?.status === "ok") {
+        setNotice("Posted successfully.");
+        setText("");
+      } else {
+        setError("Unexpected response from server.");
+      }
+    } catch (err) {
+      console.error(err);
+      setError("Couldn’t reach backend. Is it running on :8000?");
+    } finally {
+      setLoading("idle");
+    }
+  }
 
   async function onAnalyze() {
-    setLoading(true);
+    if (!canAnalyze) {
+      setNotice(null);
+      if (text.trim().length < 10) {
+        setError("Please enter at least 10 characters to analyze.");
+      } else {
+        setError("Please wait—an action is already in progress.");
+      }
+      return;
+    }
+
+    setNotice(null);
+    setError(null);
+    setLoading("analyzing");
     setResult(null);
 
     if (USE_MOCK) {
       await new Promise((res) => setTimeout(res, 200));
       setResult(mockResponse());
-      setLoading(false);
+      setLoading("idle");
       return;
     }
 
     try {
-      const res = await fetch("http://localhost:8000/submit", {
+      const res = await fetch(`${API_BASE}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: text.trim(),
-          location: location.trim() || undefined,
         }),
       });
 
@@ -102,65 +209,234 @@ export default function Page() {
       setResult(data);
     } catch (err) {
       console.error(err);
+      setError("Couldn’t reach backend. Is it running on :8000?");
     } finally {
-      setLoading(false);
+      setLoading("idle");
+    }
+  }
+
+  async function onTypeAndAnalyze() {
+    if (!canTypeAndAnalyze) {
+      setNotice(null);
+      if (text.trim().length < 10) {
+        setError("Please enter at least 10 characters to analyze.");
+      } else {
+        setError("Please wait—an action is already in progress.");
+      }
+      return;
+    }
+
+    setNotice(null);
+    setError(null);
+    setResult(null);
+    setLoading("posting");
+
+    const payload = { text: text.trim() };
+
+    if (USE_MOCK) {
+      await new Promise((res) => setTimeout(res, 250));
+      setResult(mockResponse());
+      setText("");
+      setLoading("idle");
+      return;
+    }
+
+    try {
+      // 1) Type (persist)
+      const postRes = await fetch(`${API_BASE}/post`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const postData = await postRes.json();
+
+      if (postData?.status === "rejected") {
+        setError(postData?.reason ?? "Rejected");
+        return;
+      }
+      if (postData?.status !== "ok") {
+        setError("Unexpected response from server.");
+        return;
+      }
+
+      // 2) Analyze (counts + examples)
+      setLoading("analyzing");
+      const analyzeRes = await fetch(`${API_BASE}/submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const analyzeData = await analyzeRes.json();
+      setResult(analyzeData);
+      setText("");
+    } catch (err) {
+      console.error(err);
+      setError("Couldn’t reach backend. Is it running on :8000?");
+    } finally {
+      setLoading("idle");
     }
   }
 
   const allowed = result && result.status === "allowed" ? result : null;
   const rejected = result && result.status === "rejected" ? result : null;
 
-  const trendMax = useMemo(() => {
-    if (!allowed) return 1;
-    return Math.max(1, ...allowed.trend_7d.map((t) => t.count));
+  const bigCount = useCountUp(allowed?.similar_count ?? 0, { durationMs: 1100 });
+
+  const displayExamples = useMemo<Array<{ text: string; similarity: number; created_at: string }>>(() => {
+    if (!allowed) return [];
+    const base = Array.isArray(allowed.examples) ? allowed.examples : [];
+    const submitted = allowed.submitted_post
+      ? [
+          {
+            text: allowed.submitted_post.text,
+            similarity: allowed.submitted_post.similarity,
+            created_at: allowed.submitted_post.created_at,
+          },
+        ]
+      : [];
+
+    // Put the submitted post first so it reliably appears in both lists.
+    return [...submitted, ...base];
   }, [allowed]);
 
-  return (
-    <main className="min-h-screen bg-gray-50 text-gray-900">
-      <div className="mx-auto max-w-3xl px-4 py-10 md:px-8">
-        <header className="mb-8">
-          <h1 className="text-3xl md:text-4xl font-bold tracking-tight">Semantic Theme</h1>
-          <p className="mt-2 text-base text-gray-700">
-            Paste a post idea and see similar posts, a 7‑day trend, and common phrasing.
-          </p>
-          <div className="mt-3 text-sm text-gray-600">
-            Mode: <span className="font-medium">{USE_MOCK ? "Mock data" : "Live backend"}</span>
-          </div>
-        </header>
+  const mostSimilarGroups = useMemo(() => {
+    if (!displayExamples.length) return [];
 
+    const norm = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
+    const byKey = new Map<
+      string,
+      {
+        text: string;
+        duplicates: number;
+        bestSimilarity: number;
+        bestCreatedAt: string;
+      }
+    >();
+
+    for (const ex of displayExamples) {
+      const key = norm(ex.text);
+      const prev = byKey.get(key);
+      if (!prev) {
+        byKey.set(key, {
+          text: ex.text,
+          duplicates: 1,
+          bestSimilarity: ex.similarity ?? 0,
+          bestCreatedAt: ex.created_at,
+        });
+        continue;
+      }
+
+      prev.duplicates += 1;
+      if ((ex.similarity ?? 0) > prev.bestSimilarity) {
+        prev.bestSimilarity = ex.similarity ?? 0;
+        prev.bestCreatedAt = ex.created_at;
+      }
+    }
+
+    // Show the "best" groups first
+    return [...byKey.values()]
+      .sort((a, b) => {
+        if (b.bestSimilarity !== a.bestSimilarity) return b.bestSimilarity - a.bestSimilarity;
+        const ta = new Date(a.bestCreatedAt).getTime();
+        const tb = new Date(b.bestCreatedAt).getTime();
+        return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+      })
+      .slice(0, 5);
+  }, [displayExamples]);
+
+  const mostRecentExamples = useMemo(() => {
+    if (!displayExamples.length) return [];
+    return [...displayExamples]
+      .sort((a, b) => {
+        const ta = new Date(a.created_at).getTime();
+        const tb = new Date(b.created_at).getTime();
+        const na = Number.isFinite(ta) ? ta : 0;
+        const nb = Number.isFinite(tb) ? tb : 0;
+        return nb - na;
+      })
+      .slice(0, 5);
+  }, [displayExamples]);
+
+  // (UI simplified): we no longer render trend/phrases/examples in this minimal count view.
+
+  return (
+    <main className="min-h-screen text-gray-900">
+      <div className="mx-auto max-w-3xl px-4 py-2 md:px-8">
         {/* Input */}
-        <section className="rounded-2xl border bg-white p-5 shadow-sm">
-          <label className="block text-sm font-semibold text-gray-900">Text</label>
+  <section className="rounded-3xl border border-gray-400 bg-white/80 p-5 shadow-sm backdrop-blur">
+          <div className="flex items-center gap-3">
+            <div className="text-base font-extrabold tracking-tight text-gray-950">YouType</div>
+            <a
+              href={process.env.NEXT_PUBLIC_DONATE_URL || "#"}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-full border border-gray-400 bg-white px-3 py-1 text-sm font-semibold text-gray-950 shadow-sm transition hover:bg-gray-50 hover:shadow"
+              onClick={(e) => {
+                if (!process.env.NEXT_PUBLIC_DONATE_URL) {
+                  e.preventDefault();
+                  alert('Donate link coming soon! Set NEXT_PUBLIC_DONATE_URL to enable.');
+                }
+              }}
+            >
+              ☕ Donate
+            </a>
+          </div>
           <textarea
-            className="mt-2 w-full resize-none rounded-xl border bg-white p-4 text-base leading-relaxed outline-none focus:ring-2 focus:ring-indigo-200"
+            className="mt-1.5 w-full resize-none rounded-2xl border border-gray-400 bg-white/90 p-4 text-base leading-relaxed shadow-sm outline-none focus:ring-2 focus:ring-indigo-200"
             rows={6}
-            placeholder="e.g., Rent in NYC is getting out of control…"
+            placeholder={`Paste your text here.
+
+Then click:
+• Type — save it
+• Analyze — count similar texts`}
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
 
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <div className="md:col-span-2">
-              <label className="block text-sm font-semibold text-gray-900">Location (optional)</label>
-              <input
-                className="mt-2 w-full rounded-xl border bg-white p-3 text-base outline-none focus:ring-2 focus:ring-indigo-200"
-                placeholder="e.g., New York City"
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-              />
-              <p className="mt-2 text-xs text-gray-500">Keep it short; use a city/area name.</p>
-            </div>
+          <button
+            className="mt-4 w-full rounded-2xl border border-gray-400 bg-white px-4 py-3 text-base font-semibold text-gray-950 shadow-sm transition hover:bg-gray-50 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:shadow-none data-[disabled=true]:border-gray-300"
+            onClick={onTypeAndAnalyze}
+            aria-disabled={!canTypeAndAnalyze}
+            data-disabled={!canTypeAndAnalyze ? "true" : "false"}
+            type="button"
+          >
+            {loading === "posting" || loading === "analyzing" ? "Working…" : "Type and Analyze"}
+          </button>
 
-            <div className="flex items-end">
-              <button
-                className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:opacity-50"
-                onClick={onAnalyze}
-                disabled={!canAnalyze}
-              >
-                {loading ? "Analyzing…" : "Analyze"}
-              </button>
-            </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <button
+              className="w-full rounded-2xl border border-gray-400 bg-white px-4 py-3 text-base font-semibold text-gray-950 shadow-sm transition hover:bg-gray-50 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:shadow-none data-[disabled=true]:border-gray-300"
+              onClick={onPost}
+              aria-disabled={!canPost}
+              data-disabled={!canPost ? "true" : "false"}
+              type="button"
+            >
+              {loading === "posting" ? "Typing…" : "Type"}
+            </button>
+
+            <button
+              className="w-full rounded-2xl border border-gray-400 bg-white px-4 py-3 text-base font-semibold text-gray-950 shadow-sm transition hover:bg-gray-50 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:shadow-none data-[disabled=true]:border-gray-300"
+              onClick={onAnalyze}
+              aria-disabled={!canAnalyze}
+              data-disabled={!canAnalyze ? "true" : "false"}
+              type="button"
+            >
+              {loading === "analyzing" ? "Analyzing…" : "Analyze"}
+            </button>
           </div>
+
+          {notice ? (
+            <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+              {notice}
+            </div>
+          ) : null}
+
+          {error ? (
+            <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
+              {error}
+            </div>
+          ) : null}
         </section>
 
         {/* Rejected */}
@@ -176,93 +452,73 @@ export default function Page() {
 
         {/* Allowed */}
         {allowed ? (
-          <section className="mt-6 space-y-5">
-            {/* Summary */}
-            <div className="rounded-2xl border bg-white p-5 shadow-sm">
-              <h2 className="text-xl md:text-2xl font-bold">{allowed.theme_label ?? "Semantic theme"}</h2>
-
-              <div className="mt-3 grid gap-3 md:grid-cols-3">
-                <div className="rounded-xl bg-gray-50 p-4">
-                  <div className="text-xs font-semibold text-gray-600">Similar posts</div>
-                  <div className="mt-1 text-2xl font-bold">{fmtInt(allowed.similar_count)}</div>
-                </div>
-
-                <div className="rounded-xl bg-gray-50 p-4">
-                  <div className="text-xs font-semibold text-gray-600">Threshold</div>
-                  <div className="mt-1 text-2xl font-bold">{allowed.similarity_threshold.toFixed(2)}</div>
-                </div>
-
-                <div className="rounded-xl bg-gray-50 p-4">
-                  <div className="text-xs font-semibold text-gray-600">Updated</div>
-                  <div className="mt-1 text-sm font-medium text-gray-800">{new Date().toLocaleString()}</div>
-                </div>
+          <section className="mt-6 rounded-2xl border bg-white p-8 shadow-sm">
+            <div className="text-center">
+              <div className="text-sm font-semibold uppercase tracking-wide text-gray-500">Total Similar Texts</div>
+              <div className="mt-3 text-6xl md:text-7xl font-extrabold tracking-tight text-gray-950 tabular-nums">
+                {fmtInt(bigCount)}
               </div>
             </div>
+          </section>
+        ) : null}
 
-            {/* Trend + Phrases */}
-            <div className="grid gap-5 md:grid-cols-2">
-              <div className="rounded-2xl border bg-white p-5 shadow-sm">
-                <h3 className="text-sm font-semibold text-gray-900">Trend (last 7 days)</h3>
-                <div className="mt-3 space-y-2">
-                  {allowed.trend_7d.map((t) => {
-                    const w = `${Math.round(clamp01(t.count / trendMax) * 100)}%`;
-                    return (
-                      <div key={t.date} className="grid grid-cols-[64px_1fr_36px] items-center gap-3">
-                        <div className="text-xs text-gray-600">{formatShortDate(t.date)}</div>
-                        <div className="h-2 rounded-full bg-gray-100">
-                          <div className="h-2 rounded-full bg-indigo-500" style={{ width: w }} />
-                        </div>
-                        <div className="text-xs font-semibold text-gray-700 text-right">{t.count}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="rounded-2xl border bg-white p-5 shadow-sm">
-                <h3 className="text-sm font-semibold text-gray-900">Common phrasing</h3>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {allowed.common_phrases.slice(0, 12).map((p, i) => (
-                    <span
-                      key={`${p}-${i}`}
-                      className="rounded-full border bg-gray-50 px-3 py-1 text-sm text-gray-800"
-                    >
-                      {p}
-                    </span>
-                  ))}
-                </div>
-              </div>
+        {allowed ? (
+          <section className="mt-4 rounded-2xl border bg-white p-6 shadow-sm">
+            <div className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+              Most Similar Texts
             </div>
 
-            {/* Examples */}
-            <div className="rounded-2xl border bg-white p-5 shadow-sm">
-              <h3 className="text-sm font-semibold text-gray-900">Top matching examples</h3>
+            {mostSimilarGroups.length ? (
               <div className="mt-3 space-y-3">
-                {allowed.examples.slice(0, 5).map((ex, idx) => (
-                  <article key={idx} className="rounded-xl border bg-white p-4">
-                    <p className="text-base leading-relaxed">{ex.text}</p>
-                    <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-600">
-                      <span className="rounded-full bg-indigo-50 px-2 py-1 text-indigo-700">
-                        similarity {ex.similarity.toFixed(2)}
-                      </span>
-                      <span>•</span>
-                      <span>{new Date(ex.created_at).toLocaleString()}</span>
+                {mostSimilarGroups.map((g, idx) => {
+                  return (
+                    <div
+                      key={`${g.text}-${idx}`}
+                      className="rounded-2xl border border-gray-200 bg-white/80 p-4"
+                    >
+                      <div className="text-sm text-gray-900 whitespace-pre-wrap wrap-break-word">{g.text}</div>
+                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
+                        <span>Similarity: {g.bestSimilarity}</span>
+                        <span aria-hidden="true">•</span>
+                        <span>Duplicates: {fmtInt(g.duplicates)}</span>
+                      </div>
                     </div>
-                  </article>
-                ))}
+                  );
+                })}
               </div>
+            ) : (
+              <div className="mt-3 text-sm text-gray-500">No similar posts found yet.</div>
+            )}
+          </section>
+        ) : null}
+
+        {mostRecentExamples.length ? (
+          <section className="mt-4 rounded-2xl border bg-white p-6 shadow-sm">
+            <div className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+              Recent Similar Texts
+            </div>
+            <div className="mt-3 space-y-3">
+              {mostRecentExamples.map((ex, idx) => {
+                const when = new Date(ex.created_at);
+                const whenLabel = Number.isFinite(when.getTime()) ? when.toLocaleString() : ex.created_at;
+
+                return (
+                  <div
+                    key={`${ex.created_at}-${idx}`}
+                    className="rounded-2xl border border-gray-200 bg-white/80 p-4"
+                  >
+                    <div className="text-sm text-gray-900 whitespace-pre-wrap wrap-break-word">{ex.text}</div>
+                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
+                      <span>{whenLabel}</span>
+                      <span aria-hidden="true">•</span>
+                      <span>Similarity: {ex.similarity}</span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </section>
-        ) : (
-          <section className="mt-6 rounded-2xl border bg-white p-5 text-sm text-gray-700 shadow-sm">
-            <h2 className="text-base font-semibold text-gray-900">How it works</h2>
-            <ul className="mt-2 list-disc space-y-1 pl-5">
-              <li>Submit text (and optional location)</li>
-              <li>Backend checks quality + moderation</li>
-              <li>You get similar posts, trend, common phrasing, and examples</li>
-            </ul>
-          </section>
-        )}
+        ) : null}
       </div>
     </main>
   );
