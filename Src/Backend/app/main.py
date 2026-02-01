@@ -3,10 +3,15 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
+import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from typing import Union
 
@@ -15,15 +20,22 @@ from app.embeddings import embed_text
 from app.moderation import is_low_quality, moderate
 from app.db import init_db, insert_post, fetch_posts  # <-- add
 
-app = FastAPI(title="Semantic Theme MVP API")
+load_dotenv()
 
-# Allow your Next.js dev server
+# Rate limiting setup
+limiter = Limiter(key_func=get_remote_address)
+
+app = FastAPI(title="YouType API")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS configuration with environment variables
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
+origins_list = [origin.strip() for origin in allowed_origins.split(",")]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -166,7 +178,8 @@ def delete_post(post_id: str):
     return {"ok": False, "error": "not_implemented"}
 
 @app.post("/submit", response_model=Union[AllowedResponse, RejectedResponse])
-def submit(payload: SubmitRequest):
+@limiter.limit("10/minute")  # Rate limit: 10 submissions per minute per IP
+def submit(request: Request, payload: SubmitRequest):
     # 1) Moderation
     reason = is_low_quality(payload.text)
     if reason:
@@ -264,7 +277,8 @@ def submit(payload: SubmitRequest):
 
 
 @app.post("/post")
-def post_only(payload: PostOnlyRequest):
+@limiter.limit("20/minute")  # Rate limit: 20 posts per minute per IP
+def post_only(request: Request, payload: PostOnlyRequest):
     """Persist text without embeddings/analysis (useful for simple posting)."""
     reason = is_low_quality(payload.text)
     if reason:

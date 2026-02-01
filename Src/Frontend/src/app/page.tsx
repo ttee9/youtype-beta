@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 const USE_MOCK = false;
-const API_BASE = "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 
 type TrendPoint = { date: string; count: number };
 
@@ -368,10 +368,16 @@ export default function Page() {
           <div className="flex items-center gap-3">
             <div className="text-base font-extrabold tracking-tight text-gray-950">YouType</div>
             <a
-              href="https://ko-fi.com/yourname"
+              href={process.env.NEXT_PUBLIC_DONATE_URL || "#"}
               target="_blank"
               rel="noopener noreferrer"
               className="rounded-full border border-gray-400 bg-white px-3 py-1 text-sm font-semibold text-gray-950 shadow-sm transition hover:bg-gray-50 hover:shadow"
+              onClick={(e) => {
+                if (!process.env.NEXT_PUBLIC_DONATE_URL) {
+                  e.preventDefault();
+                  alert('Donate link coming soon! Set NEXT_PUBLIC_DONATE_URL to enable.');
+                }
+              }}
             >
               ☕ Donate
             </a>
