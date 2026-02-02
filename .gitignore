@@ -7,6 +7,10 @@ node_modules/
 .next/
 .env*
 
+# Python virtual environments
+.venv/
+**/.venv/
+
 # Python
 __pycache___/
 *.pyc
