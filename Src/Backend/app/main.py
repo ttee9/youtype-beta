@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
 import os
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
@@ -179,7 +179,7 @@ def delete_post(post_id: str):
 
 @app.post("/submit", response_model=Union[AllowedResponse, RejectedResponse])
 @limiter.limit("10/minute")  # Rate limit: 10 submissions per minute per IP
-def submit(request: Request, payload: SubmitRequest):
+async def submit(request: Request, payload: SubmitRequest = Body(...)):
     # 1) Moderation
     reason = is_low_quality(payload.text)
     if reason:
@@ -278,7 +278,7 @@ def submit(request: Request, payload: SubmitRequest):
 
 @app.post("/post")
 @limiter.limit("20/minute")  # Rate limit: 20 posts per minute per IP
-def post_only(request: Request, payload: PostOnlyRequest):
+async def post_only(request: Request, payload: PostOnlyRequest = Body(...)):
     """Persist text without embeddings/analysis (useful for simple posting)."""
     reason = is_low_quality(payload.text)
     if reason:
