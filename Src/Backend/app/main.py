@@ -61,6 +61,10 @@ class PostOnlyRequest(BaseModel):
     location: Optional[str] = Field(default=None, max_length=200)
 
 
+SubmitRequest.model_rebuild()
+PostOnlyRequest.model_rebuild()
+
+
 class Example(BaseModel):
     text: str
     similarity: float
