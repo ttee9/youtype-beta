@@ -36,6 +36,7 @@ origins_list = [origin.strip() for origin in allowed_origins.split(",")]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins_list,
+    allow_origin_regex=r"https://.*\.vercel\.app$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
