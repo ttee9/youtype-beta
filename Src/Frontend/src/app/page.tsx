@@ -157,7 +157,6 @@ export default function Page() {
         setError(data?.reason ?? "Rejected");
       } else if (data?.status === "ok") {
         setNotice("Posted successfully.");
-        setText("");
       } else {
         setError("Unexpected response from server.");
       }
