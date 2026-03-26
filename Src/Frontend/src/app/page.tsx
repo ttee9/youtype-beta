@@ -120,10 +120,6 @@ export default function Page() {
 
   const canPost = useMemo(() => text.trim().length >= 5 && loading === "idle", [text, loading]);
   const canAnalyze = useMemo(() => text.trim().length >= 10 && loading === "idle", [text, loading]);
-  const canTypeAndAnalyze = useMemo(
-    () => text.trim().length >= 10 && loading === "idle",
-    [text, loading]
-  );
 
   async function onPost() {
     if (!canPost) {
@@ -207,57 +203,6 @@ export default function Page() {
 
       const data = await res.json();
       setResult(data);
-    } catch (err) {
-      console.error(err);
-      setError("Couldn’t reach backend. Is it running on :8000?");
-    } finally {
-      setLoading("idle");
-    }
-  }
-
-  async function onTypeAndAnalyze() {
-    if (!canTypeAndAnalyze) {
-      setNotice(null);
-      if (text.trim().length < 10) {
-        setError("Please enter at least 10 characters to analyze.");
-      } else {
-        setError("Please wait—an action is already in progress.");
-      }
-      return;
-    }
-
-    setNotice(null);
-    setError(null);
-    setResult(null);
-    setLoading("analyzing");
-
-    const payload = { text: text.trim() };
-
-    if (USE_MOCK) {
-      await new Promise((res) => setTimeout(res, 250));
-      setResult(mockResponse());
-      setText("");
-      setLoading("idle");
-      return;
-    }
-
-    try {
-      // /submit persists the post (with embedding) and returns similarity results
-      const analyzeRes = await fetch(`${API_BASE}/submit`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const analyzeData = await analyzeRes.json();
-
-      if (analyzeData?.status === "rejected") {
-        setError(analyzeData?.reason ?? "Rejected");
-        return;
-      }
-
-      setResult(analyzeData);
-      setText("");
     } catch (err) {
       console.error(err);
       setError("Couldn’t reach backend. Is it running on :8000?");
@@ -382,17 +327,7 @@ Then click:
             onChange={(e) => setText(e.target.value)}
           />
 
-          <button
-            className="mt-4 w-full rounded-2xl border border-gray-400 bg-white px-4 py-3 text-base font-semibold text-gray-950 shadow-sm transition hover:bg-gray-50 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:shadow-none data-[disabled=true]:border-gray-300"
-            onClick={onTypeAndAnalyze}
-            aria-disabled={!canTypeAndAnalyze}
-            data-disabled={!canTypeAndAnalyze ? "true" : "false"}
-            type="button"
-          >
-            {loading === "posting" || loading === "analyzing" ? "Working…" : "Type and Analyze"}
-          </button>
-
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <button
               className="w-full rounded-2xl border border-gray-400 bg-white px-4 py-3 text-base font-semibold text-gray-950 shadow-sm transition hover:bg-gray-50 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:shadow-none data-[disabled=true]:border-gray-300"
               onClick={onPost}
