@@ -229,7 +229,7 @@ export default function Page() {
     setNotice(null);
     setError(null);
     setResult(null);
-    setLoading("posting");
+    setLoading("analyzing");
 
     const payload = { text: text.trim() };
 
@@ -242,25 +242,7 @@ export default function Page() {
     }
 
     try {
-      // 1) Type (persist)
-      const postRes = await fetch(`${API_BASE}/post`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const postData = await postRes.json();
-
-      if (postData?.status === "rejected") {
-        setError(postData?.reason ?? "Rejected");
-        return;
-      }
-      if (postData?.status !== "ok") {
-        setError("Unexpected response from server.");
-        return;
-      }
-
-      // 2) Analyze (counts + examples)
-      setLoading("analyzing");
+      // /submit persists the post (with embedding) and returns similarity results
       const analyzeRes = await fetch(`${API_BASE}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -268,6 +250,12 @@ export default function Page() {
       });
 
       const analyzeData = await analyzeRes.json();
+
+      if (analyzeData?.status === "rejected") {
+        setError(analyzeData?.reason ?? "Rejected");
+        return;
+      }
+
       setResult(analyzeData);
       setText("");
     } catch (err) {
