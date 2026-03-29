@@ -2,9 +2,12 @@ import os
 from contextlib import contextmanager
 from typing import Any, Dict, Iterator, List, Optional
 
+from dotenv import load_dotenv
 from sqlalchemy import String, Text, create_engine, text
 from sqlalchemy.orm import DeclarativeBase, Session, Mapped, mapped_column
 from pgvector.sqlalchemy import Vector
+
+load_dotenv()
 
 EMBEDDING_DIM = 1536  # text-embedding-3-small
 
