@@ -1,17 +1,14 @@
-from __future__ import annotations
-
-import json
 import os
 from contextlib import contextmanager
 from typing import Any, Dict, Iterator, List, Optional
 
-from sqlalchemy import Column, String, Text, create_engine
+from sqlalchemy import String, Text, create_engine, text
 from sqlalchemy.orm import DeclarativeBase, Session, Mapped, mapped_column
+from pgvector.sqlalchemy import Vector
 
-DB_PATH = os.getenv("DB_PATH", "app.db")
-DB_URL = f"sqlite:///{DB_PATH}"
+EMBEDDING_DIM = 1536  # text-embedding-3-small
 
-engine = create_engine(DB_URL, future=True)
+engine = create_engine(os.getenv("DATABASE_URL", ""), future=True)
 
 
 class Base(DeclarativeBase):
@@ -25,12 +22,13 @@ class Post(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     location: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
-
-    # store embeddings as JSON text (simple + portable)
-    embedding_json: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[Optional[List[float]]] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
 
 
 def init_db() -> None:
+    with engine.connect() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        conn.commit()
     Base.metadata.create_all(bind=engine)
 
 
@@ -48,13 +46,43 @@ def insert_post(*, post: Dict[str, Any]) -> None:
                 text=post["text"],
                 location=post.get("location"),
                 created_at=post["created_at"],
-                embedding_json=json.dumps(post.get("embedding", [])),
+                embedding=post.get("embedding") or None,
             )
         )
         session.commit()
 
 
+def find_similar_posts(
+    *, query_embedding: List[float], threshold: float, exclude_id: str, limit: int = 500
+) -> List[Dict[str, Any]]:
+    """Return posts with cosine similarity >= threshold, ordered by similarity desc."""
+    with session_scope() as session:
+        results = (
+            session.query(
+                Post,
+                (1 - Post.embedding.cosine_distance(query_embedding)).label("similarity"),
+            )
+            .filter(Post.embedding.isnot(None))
+            .filter(Post.id != exclude_id)
+            .filter((1 - Post.embedding.cosine_distance(query_embedding)) >= threshold)
+            .order_by(Post.embedding.cosine_distance(query_embedding))
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "id": row.Post.id,
+                "text": row.Post.text,
+                "location": row.Post.location,
+                "created_at": row.Post.created_at,
+                "similarity": float(row.similarity),
+            }
+            for row in results
+        ]
+
+
 def fetch_posts(*, limit: int = 500) -> List[Dict[str, Any]]:
+    """Return recent posts (for /posts endpoint)."""
     with session_scope() as session:
         rows = (
             session.query(Post)
@@ -62,16 +90,12 @@ def fetch_posts(*, limit: int = 500) -> List[Dict[str, Any]]:
             .limit(limit)
             .all()
         )
-
-        posts: List[Dict[str, Any]] = []
-        for r in rows:
-            posts.append(
-                {
-                    "id": r.id,
-                    "text": r.text,
-                    "location": r.location,
-                    "created_at": r.created_at,
-                    "embedding": json.loads(r.embedding_json) if r.embedding_json else [],
-                }
-            )
-        return posts
+        return [
+            {
+                "id": r.id,
+                "text": r.text,
+                "location": r.location,
+                "created_at": r.created_at,
+            }
+            for r in rows
+        ]

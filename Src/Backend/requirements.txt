@@ -5,3 +5,5 @@ openai==1.59.5
 python-dotenv==1.0.1
 sqlalchemy>=2.0
 slowapi==0.1.9
+psycopg2-binary==2.9.10
+pgvector==0.3.6
