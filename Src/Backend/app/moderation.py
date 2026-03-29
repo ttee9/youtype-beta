@@ -69,11 +69,14 @@ def moderate(text: str) -> Tuple[bool, Optional[str]]:
         return False, reason
 
     # 2) OpenAI Moderation
-    resp = client.moderations.create(
-        model="omni-moderation-latest",
-        input=text
-    )
-    r = resp.results[0]
+    try:
+        resp = client.moderations.create(
+            model="omni-moderation-latest",
+            input=text
+        )
+        r = resp.results[0]
+    except Exception as e:
+        raise RuntimeError(f"Moderation request failed: {e}") from e
 
     if r.flagged:
         return False, "This content isn’t allowed."

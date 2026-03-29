@@ -46,6 +46,8 @@ app.add_middleware(
 
 @app.on_event("startup")
 def _startup() -> None:
+    if not os.getenv("OPENAI_API_KEY"):
+        raise RuntimeError("OPENAI_API_KEY environment variable is not set")
     init_db()
 
 
@@ -188,11 +190,17 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
     if reason:
         return {"status": "rejected", "reason": reason}
 
-    allowed, reason = moderate(payload.text)
+    try:
+        allowed, reason = moderate(payload.text)
+    except RuntimeError:
+        return {"status": "rejected", "reason": "Moderation service unavailable. Please try again later."}
     if not allowed:
         return {"status": "rejected", "reason": reason}
 
-    embedding = embed_text(payload.text)
+    try:
+        embedding = embed_text(payload.text)
+    except RuntimeError:
+        return {"status": "rejected", "reason": "Analysis service unavailable. Please try again later."}
 
     # 2) Save the post (submission is now real)
     post_id = str(uuid4())
@@ -221,7 +229,6 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
             continue  # don't compare the post to itself
 
         sim = cosine_similarity(query_embedding, p.get("embedding") or [])
-        print("sim:", sim, "text:", p["text"][:50])
 
         if sim >= threshold:
             scored.append((sim, p))
@@ -287,7 +294,10 @@ async def post_only(request: Request, payload: PostOnlyRequest = Body(...)):
     if reason:
         return {"status": "rejected", "reason": reason}
 
-    allowed, reason = moderate(payload.text)
+    try:
+        allowed, reason = moderate(payload.text)
+    except RuntimeError:
+        return {"status": "rejected", "reason": "Moderation service unavailable. Please try again later."}
     if not allowed:
         return {"status": "rejected", "reason": reason}
 
