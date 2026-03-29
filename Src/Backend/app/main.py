@@ -13,10 +13,9 @@ from slowapi.errors import RateLimitExceeded
 
 from typing import Union
 
-import math
 from app.embeddings import embed_text
 from app.moderation import is_low_quality, moderate
-from app.db import init_db, insert_post, fetch_posts  # <-- add
+from app.db import init_db, insert_post, fetch_posts, find_similar_posts
 
 load_dotenv()
 
@@ -40,12 +39,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# NOTE: We persist posts to SQLite. Avoid relying on in-memory state for anything
-# you want to survive server restarts.
-
-
 @app.on_event("startup")
 def _startup() -> None:
+    if not os.getenv("OPENAI_API_KEY"):
+        raise RuntimeError("OPENAI_API_KEY environment variable is not set")
+    if not os.getenv("DATABASE_URL"):
+        raise RuntimeError("DATABASE_URL environment variable is not set")
     init_db()
 
 
@@ -110,48 +109,9 @@ class RejectedResponse(BaseModel):
     reason: str
     policy_category: Optional[str] = None
 
-def cosine_similarity(a: list[float], b: list[float]) -> float:
-    if not a or not b:
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
-    na = math.sqrt(sum(x * x for x in a))
-    nb = math.sqrt(sum(y * y for y in b))
-    if na == 0.0 or nb == 0.0:
-        return 0.0
-    return dot / (na * nb)
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _simple_moderation(text: str) -> Optional[RejectedResponse]:
-    """
-    MVP moderation placeholder:
-    - Reject if empty-ish
-    - Reject if it contains obvious spammy patterns
-    Replace with LLM moderation later.
-    """
-    t = text.strip().lower()
-    if len(t) < 5:
-        return RejectedResponse(reason="Please enter at least 5 characters.")
-    if "http://" in t or "https://" in t:
-        return RejectedResponse(reason="Links are not allowed in the MVP.", policy_category="spam")
-    return None
-
-
-def _tokenize(s: str) -> set[str]:
-    # Tiny tokenizer for MVP similarity; embeddings come later
-    keep = "".join(ch.lower() if ch.isalnum() else " " for ch in s)
-    toks = [w for w in keep.split() if len(w) >= 3]
-    return set(toks)
-
-
-def _jaccard(a: set[str], b: set[str]) -> float:
-    if not a and not b:
-        return 1.0
-    inter = len(a & b)
-    union = len(a | b)
-    return inter / union if union else 0.0
 
 
 @app.get("/health")
@@ -188,11 +148,17 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
     if reason:
         return {"status": "rejected", "reason": reason}
 
-    allowed, reason = moderate(payload.text)
+    try:
+        allowed, reason = moderate(payload.text)
+    except RuntimeError:
+        return {"status": "rejected", "reason": "Moderation service unavailable. Please try again later."}
     if not allowed:
         return {"status": "rejected", "reason": reason}
 
-    embedding = embed_text(payload.text)
+    try:
+        embedding = embed_text(payload.text)
+    except RuntimeError:
+        return {"status": "rejected", "reason": "Analysis service unavailable. Please try again later."}
 
     # 2) Save the post (submission is now real)
     post_id = str(uuid4())
@@ -205,29 +171,17 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
         "embedding": embedding,
     }
 
-    # Persist to SQLite
+    # Persist to Postgres
     insert_post(post=record)
 
-    # 3) "Similarity" (MVP): Jaccard on tokens
-    query_embedding = record["embedding"]
-    threshold = 0.78  # good starting point
+    # 3) Find similar posts via pgvector cosine similarity
+    threshold = 0.78
+    scored_posts = find_similar_posts(
+        query_embedding=record["embedding"],
+        threshold=threshold,
+        exclude_id=record["id"],
+    )
 
-    scored = []
-
-    # Compare against persisted history (so similarity survives restarts)
-    history = fetch_posts(limit=500)
-    for p in history:
-        if p["id"] == record["id"]:
-            continue  # don't compare the post to itself
-
-        sim = cosine_similarity(query_embedding, p.get("embedding") or [])
-        print("sim:", sim, "text:", p["text"][:50])
-
-        if sim >= threshold:
-            scored.append((sim, p))
-
-    scored.sort(key=lambda x: x[0], reverse=True)
-    
     # 4) Trend over last 7 days
     today = _now_utc().date()
     buckets: Dict[str, int] = {}
@@ -235,7 +189,7 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
         d = (today - timedelta(days=(6 - i))).isoformat()
         buckets[d] = 0
 
-    for sim, p in scored:
+    for p in scored_posts:
         dt = datetime.fromisoformat(p["created_at"])
         d = dt.date().isoformat()
         if d in buckets:
@@ -255,13 +209,13 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
     examples = [
         Example(
             text=p["text"],
-            similarity=round(sim, 2),
+            similarity=round(p["similarity"], 2),
             created_at=p["created_at"],
         )
-        for sim, p in scored[:5]
+        for p in scored_posts[:5]
     ]
 
-    theme_label = "Semantic theme (MVP)"  # You'll replace this with LLM labeling later
+    theme_label = "Semantic theme (MVP)"
 
     return AllowedResponse(
         theme_label=theme_label,
@@ -271,7 +225,7 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
             created_at=record["created_at"],
             similarity=1.0,
         ),
-        similar_count=len(scored) + 1,  # Include the submitted post itself in the count
+        similar_count=len(scored_posts) + 1,  # Include the submitted post itself in the count
         similarity_threshold=threshold,
         trend_7d=trend,
         common_phrases=common_phrases,
@@ -287,7 +241,10 @@ async def post_only(request: Request, payload: PostOnlyRequest = Body(...)):
     if reason:
         return {"status": "rejected", "reason": reason}
 
-    allowed, reason = moderate(payload.text)
+    try:
+        allowed, reason = moderate(payload.text)
+    except RuntimeError:
+        return {"status": "rejected", "reason": "Moderation service unavailable. Please try again later."}
     if not allowed:
         return {"status": "rejected", "reason": reason}
 
