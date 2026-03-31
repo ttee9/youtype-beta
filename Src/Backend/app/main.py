@@ -149,14 +149,14 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
         return {"status": "rejected", "reason": reason}
 
     try:
-        allowed, reason = moderate(payload.text)
+        allowed, reason = await moderate(payload.text)
     except RuntimeError:
         return {"status": "rejected", "reason": "Moderation service unavailable. Please try again later."}
     if not allowed:
         return {"status": "rejected", "reason": reason}
 
     try:
-        embedding = embed_text(payload.text)
+        embedding = await embed_text(payload.text)
     except RuntimeError:
         return {"status": "rejected", "reason": "Analysis service unavailable. Please try again later."}
 
