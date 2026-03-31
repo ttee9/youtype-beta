@@ -2,10 +2,10 @@ import os
 import re
 from typing import Optional, Tuple
 from dotenv import load_dotenv
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Very lightweight PII patterns (MVP)
 EMAIL_RE = re.compile(r"\b[\w\.-]+@[\w\.-]+\.\w+\b")
@@ -59,7 +59,7 @@ def quick_rules(text: str) -> Optional[str]:
         return "Please don’t share personal contact info."
     return None
 
-def moderate(text: str) -> Tuple[bool, Optional[str]]:
+async def moderate(text: str) -> Tuple[bool, Optional[str]]:
     """
     Returns (allowed, reason_if_blocked)
     """
@@ -70,7 +70,7 @@ def moderate(text: str) -> Tuple[bool, Optional[str]]:
 
     # 2) OpenAI Moderation
     try:
-        resp = client.moderations.create(
+        resp = await client.moderations.create(
             model="omni-moderation-latest",
             input=text
         )
