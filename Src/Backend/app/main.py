@@ -242,7 +242,7 @@ async def post_only(request: Request, payload: PostOnlyRequest = Body(...)):
         return {"status": "rejected", "reason": reason}
 
     try:
-        allowed, reason = moderate(payload.text)
+        allowed, reason = await moderate(payload.text)
     except RuntimeError:
         return {"status": "rejected", "reason": "Moderation service unavailable. Please try again later."}
     if not allowed:
