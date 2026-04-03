@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export function middleware(request: NextRequest) {
-  const country = request.geo?.country || request.headers.get("x-vercel-ip-country");
+  const country = request.headers.get("x-vercel-ip-country");
 
   if (country && country !== "US") {
     return NextResponse.redirect(new URL("/not-available", request.url));
