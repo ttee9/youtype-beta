@@ -117,19 +117,29 @@ export default function Page() {
   const [result, setResult] = useState<SubmitResponse | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [includeLocation, setIncludeLocation] = useState(false);
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [mapPosts, setMapPosts] = useState<MapPost[]>([]);
   const [showMap, setShowMap] = useState(false);
   const [mapLoading, setMapLoading] = useState(false);
   const [lastPostId, setLastPostId] = useState<string | undefined>(undefined);
 
-  useEffect(() => {
-    if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(
-      (pos) => setUserCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      () => { /* permission denied or unavailable — silently ignore */ }
-    );
-  }, []);
+  const geoSupported = typeof navigator !== "undefined" && !!navigator.geolocation;
+
+  async function resolveCoords(): Promise<{ lat: number; lng: number } | null> {
+    if (!includeLocation || !geoSupported) return null;
+    if (userCoords) return userCoords;
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          setUserCoords(coords);
+          resolve(coords);
+        },
+        () => resolve(null)
+      );
+    });
+  }
 
   async function loadMapPosts() {
     setMapLoading(true);
@@ -175,13 +185,14 @@ export default function Page() {
     }
 
     try {
+      const coords = await resolveCoords();
       const res = await fetch(`${API_BASE}/post`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: text.trim(),
-          latitude: userCoords?.lat ?? null,
-          longitude: userCoords?.lng ?? null,
+          latitude: coords?.lat ?? null,
+          longitude: coords?.lng ?? null,
         }),
       });
       const data = await res.json();
@@ -226,13 +237,14 @@ export default function Page() {
     }
 
     try {
+      const coords = await resolveCoords();
       const res = await fetch(`${API_BASE}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: text.trim(),
-          latitude: userCoords?.lat ?? null,
-          longitude: userCoords?.lng ?? null,
+          latitude: coords?.lat ?? null,
+          longitude: coords?.lng ?? null,
         }),
       });
 
@@ -365,6 +377,26 @@ Then click:
             onChange={(e) => setText(e.target.value)}
           />
 
+          {geoSupported && (
+            <label className="mt-3 flex items-center gap-2 cursor-pointer select-none w-fit">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-gray-300 accent-indigo-600"
+                checked={includeLocation}
+                onChange={(e) => {
+                  setIncludeLocation(e.target.checked);
+                  if (!e.target.checked) setUserCoords(null);
+                }}
+              />
+              <span className="text-sm text-gray-600">
+                Pin my location on the map
+                {userCoords && includeLocation ? (
+                  <span className="ml-1.5 text-emerald-600 text-xs">· location ready</span>
+                ) : null}
+              </span>
+            </label>
+          )}
+
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <button
               className="w-full rounded-2xl border border-gray-400 bg-white px-4 py-3 text-base font-semibold text-gray-950 shadow-sm transition hover:bg-gray-50 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:shadow-none data-[disabled=true]:border-gray-300"
@@ -488,11 +520,9 @@ Then click:
               Post Locations Map
             </div>
             <div className="flex items-center gap-2">
-              {userCoords ? (
-                <span className="text-xs text-emerald-600">Location detected</span>
-              ) : (
-                <span className="text-xs text-gray-400">No location (allow browser GPS to pin your posts)</span>
-              )}
+              {userCoords && includeLocation ? (
+                <span className="text-xs text-emerald-600">Your posts will be pinned</span>
+              ) : null}
               <button
                 className="rounded-xl border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50"
                 onClick={() => {
