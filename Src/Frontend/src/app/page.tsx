@@ -1,6 +1,10 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { MapPost } from "./PostMap";
+
+const PostMap = dynamic(() => import("./PostMap"), { ssr: false });
 
 const USE_MOCK = false;
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
@@ -113,10 +117,35 @@ export default function Page() {
   const [result, setResult] = useState<SubmitResponse | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [mapPosts, setMapPosts] = useState<MapPost[]>([]);
+  const [showMap, setShowMap] = useState(false);
+  const [mapLoading, setMapLoading] = useState(false);
+  const [lastPostId, setLastPostId] = useState<string | undefined>(undefined);
 
   useEffect(() => {
-    // no-op for now
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => setUserCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => { /* permission denied or unavailable — silently ignore */ }
+    );
   }, []);
+
+  async function loadMapPosts() {
+    setMapLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/posts`);
+      const data = await res.json();
+      const geo: MapPost[] = (data.posts ?? []).filter(
+        (p: any) => typeof p.latitude === "number" && typeof p.longitude === "number"
+      );
+      setMapPosts(geo);
+    } catch {
+      // ignore map load errors
+    } finally {
+      setMapLoading(false);
+    }
+  }
 
   const canPost = useMemo(() => text.trim().length >= 5 && loading === "idle", [text, loading]);
   const canAnalyze = useMemo(() => text.trim().length >= 10 && loading === "idle", [text, loading]);
@@ -149,7 +178,11 @@ export default function Page() {
       const res = await fetch(`${API_BASE}/post`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text.trim() }),
+        body: JSON.stringify({
+          text: text.trim(),
+          latitude: userCoords?.lat ?? null,
+          longitude: userCoords?.lng ?? null,
+        }),
       });
       const data = await res.json();
 
@@ -157,6 +190,7 @@ export default function Page() {
         setError(data?.reason ?? "Rejected");
       } else if (data?.status === "ok") {
         setNotice("Posted successfully.");
+        setLastPostId(data.id);
       } else {
         setError("Unexpected response from server.");
       }
@@ -197,11 +231,16 @@ export default function Page() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: text.trim(),
+          latitude: userCoords?.lat ?? null,
+          longitude: userCoords?.lng ?? null,
         }),
       });
 
       const data = await res.json();
       setResult(data);
+      if (data?.status === "allowed" && data?.submitted_post?.id) {
+        setLastPostId(data.submitted_post.id);
+      }
     } catch (err) {
       console.error(err);
       setError("Couldn’t reach backend. Is it running on :8000?");
@@ -441,6 +480,57 @@ Then click:
             </div>
           </section>
         ) : null}
+
+        {/* Map section */}
+        <section className="mt-4 rounded-2xl border bg-white p-6 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+              Post Locations Map
+            </div>
+            <div className="flex items-center gap-2">
+              {userCoords ? (
+                <span className="text-xs text-emerald-600">Location detected</span>
+              ) : (
+                <span className="text-xs text-gray-400">No location (allow browser GPS to pin your posts)</span>
+              )}
+              <button
+                className="rounded-xl border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50"
+                onClick={() => {
+                  if (!showMap) {
+                    setShowMap(true);
+                    loadMapPosts();
+                  } else {
+                    setShowMap(false);
+                  }
+                }}
+                type="button"
+              >
+                {showMap ? "Hide map" : "Show map"}
+              </button>
+            </div>
+          </div>
+
+          {showMap && (
+            <div className="mt-4">
+              {mapLoading ? (
+                <div className="flex items-center justify-center h-32 text-sm text-gray-400">
+                  Loading posts…
+                </div>
+              ) : mapPosts.length === 0 ? (
+                <div className="flex items-center justify-center h-32 text-sm text-gray-400">
+                  No geo-tagged posts yet. Allow location access and submit a post to appear here.
+                </div>
+              ) : (
+                <>
+                  <PostMap posts={mapPosts} highlightId={lastPostId} />
+                  <p className="mt-2 text-xs text-gray-400 text-center">
+                    {mapPosts.length} geo-tagged {mapPosts.length === 1 ? "post" : "posts"} · click a marker to read
+                  </p>
+                </>
+              )}
+            </div>
+          )}
+        </section>
       </div>
     </main>
   );
