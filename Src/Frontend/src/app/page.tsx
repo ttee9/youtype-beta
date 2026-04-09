@@ -202,6 +202,8 @@ export default function Page() {
       } else if (data?.status === "ok") {
         setNotice("Posted successfully.");
         setLastPostId(data.id);
+        setShowMap(true);
+        loadMapPosts();
       } else {
         setError("Unexpected response from server.");
       }
@@ -252,6 +254,8 @@ export default function Page() {
       setResult(data);
       if (data?.status === "allowed" && data?.submitted_post?.id) {
         setLastPostId(data.submitted_post.id);
+        setShowMap(true);
+        loadMapPosts();
       }
     } catch (err) {
       console.error(err);
