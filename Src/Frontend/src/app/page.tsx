@@ -455,6 +455,61 @@ Then click:
           </section>
         ) : null}
 
+        {allowed && allowed.trend_7d?.length ? (
+          <section className="mt-4 rounded-2xl border bg-white p-6 shadow-sm">
+            <div className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+              When People Are Typing
+            </div>
+            <div className="mt-4 flex items-end justify-between gap-1.5 h-28">
+              {(() => {
+                const maxCount = Math.max(...allowed.trend_7d.map((p) => p.count), 1);
+                return allowed.trend_7d.map((point) => {
+                  const heightPct = Math.max((point.count / maxCount) * 100, 2);
+                  const d = new Date(point.date + "T00:00:00");
+                  const dayLabel = Number.isFinite(d.getTime())
+                    ? d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+                    : point.date;
+                  const isToday =
+                    new Date().toISOString().slice(0, 10) === point.date;
+                  return (
+                    <div
+                      key={point.date}
+                      className="flex flex-1 flex-col items-center gap-1 h-full justify-end"
+                    >
+                      {point.count > 0 && (
+                        <span className="text-[10px] font-semibold text-gray-400 tabular-nums">
+                          {fmtInt(point.count)}
+                        </span>
+                      )}
+                      <div
+                        className={`w-full rounded-t-md transition-all ${isToday ? "bg-indigo-400" : "bg-gray-200"}`}
+                        style={{ height: `${heightPct}%` }}
+                        title={`${dayLabel}: ${fmtInt(point.count)}`}
+                      />
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+            <div className="mt-1.5 flex justify-between gap-1.5">
+              {allowed.trend_7d.map((point) => {
+                const d = new Date(point.date + "T00:00:00");
+                const dayLabel = Number.isFinite(d.getTime())
+                  ? d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+                  : point.date;
+                const isToday = new Date().toISOString().slice(0, 10) === point.date;
+                return (
+                  <div key={point.date} className="flex-1 text-center">
+                    <span className={`text-[10px] ${isToday ? "font-semibold text-indigo-500" : "text-gray-400"}`}>
+                      {dayLabel}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
+
         {allowed ? (
           <section className="mt-4 rounded-2xl border bg-white p-6 shadow-sm">
             <div className="text-sm font-semibold uppercase tracking-wide text-gray-500">
