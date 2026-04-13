@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from typing import Any, Dict, Iterator, List, Optional
 
 from dotenv import load_dotenv
-from sqlalchemy import Float, String, Text, create_engine, text
+from sqlalchemy import String, Text, create_engine, text
 from sqlalchemy.orm import DeclarativeBase, Session, Mapped, mapped_column
 from pgvector.sqlalchemy import Vector
 
@@ -24,8 +24,6 @@ class Post(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     location: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    latitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     embedding: Mapped[Optional[List[float]]] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
 
@@ -35,11 +33,6 @@ def init_db() -> None:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         conn.commit()
     Base.metadata.create_all(bind=engine)
-    # Add new columns to existing tables if they don't exist yet
-    with engine.connect() as conn:
-        conn.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS latitude FLOAT"))
-        conn.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS longitude FLOAT"))
-        conn.commit()
 
 
 @contextmanager
@@ -55,8 +48,6 @@ def insert_post(*, post: Dict[str, Any]) -> None:
                 id=post["id"],
                 text=post["text"],
                 location=post.get("location"),
-                latitude=post.get("latitude"),
-                longitude=post.get("longitude"),
                 created_at=post["created_at"],
                 embedding=post.get("embedding") or None,
             )
@@ -86,8 +77,6 @@ def find_similar_posts(
                 "id": row.Post.id,
                 "text": row.Post.text,
                 "location": row.Post.location,
-                "latitude": row.Post.latitude,
-                "longitude": row.Post.longitude,
                 "created_at": row.Post.created_at,
                 "similarity": float(row.similarity),
             }
@@ -109,8 +98,6 @@ def fetch_posts(*, limit: int = 500) -> List[Dict[str, Any]]:
                 "id": r.id,
                 "text": r.text,
                 "location": r.location,
-                "latitude": r.latitude,
-                "longitude": r.longitude,
                 "created_at": r.created_at,
             }
             for r in rows
