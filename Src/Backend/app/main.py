@@ -51,15 +51,11 @@ def _startup() -> None:
 class SubmitRequest(BaseModel):
     text: str = Field(min_length=1, max_length=5000)
     location: Optional[str] = Field(default=None, max_length=200)
-    latitude: Optional[float] = Field(default=None, ge=-90, le=90)
-    longitude: Optional[float] = Field(default=None, ge=-180, le=180)
 
 
 class PostOnlyRequest(BaseModel):
     text: str = Field(min_length=1, max_length=5000)
     location: Optional[str] = Field(default=None, max_length=200)
-    latitude: Optional[float] = Field(default=None, ge=-90, le=90)
-    longitude: Optional[float] = Field(default=None, ge=-180, le=180)
 
 
 SubmitRequest.model_rebuild()
@@ -81,8 +77,6 @@ class PostOut(BaseModel):
     id: str
     text: str
     location: Optional[str] = None
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
     created_at: str
 
 
@@ -173,8 +167,6 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
         "id": post_id,
         "text": payload.text.strip(),
         "location": (payload.location or "").strip() or None,
-        "latitude": payload.latitude,
-        "longitude": payload.longitude,
         "created_at": created_at,
         "embedding": embedding,
     }
@@ -262,8 +254,6 @@ async def post_only(request: Request, payload: PostOnlyRequest = Body(...)):
         "id": post_id,
         "text": payload.text.strip(),
         "location": (payload.location or "").strip() or None,
-        "latitude": payload.latitude,
-        "longitude": payload.longitude,
         "created_at": created_at,
         "embedding": [],
     }
