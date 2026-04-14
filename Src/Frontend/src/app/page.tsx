@@ -14,7 +14,8 @@ type SubmitResponse =
       submitted_post: { id: string; text: string; created_at: string; similarity: number };
       similar_count: number;
       similarity_threshold: number;
-      trend_7d: TrendPoint[];
+      trend: TrendPoint[];
+      trend_granularity: "day" | "week" | "month";
       common_phrases: string[];
       examples: { text: string; similarity: number; created_at: string }[];
     }
@@ -39,7 +40,8 @@ function mockResponse(): SubmitResponse {
     },
     similar_count: 3421,
     similarity_threshold: 0.82,
-    trend_7d: days,
+    trend: days,
+    trend_granularity: "day",
     common_phrases: [
       "rent is insane",
       "unaffordable apartments",
@@ -382,58 +384,125 @@ Then click:
           </section>
         ) : null}
 
-        {allowed && allowed.trend_7d?.length ? (
+        {allowed && allowed.trend?.length ? (
           <section className="mt-4 rounded-2xl border bg-white p-6 shadow-sm">
-            <div className="text-sm font-semibold uppercase tracking-wide text-gray-500">
-              When People Are Typing
-            </div>
-            <div className="mt-4 flex items-end justify-between gap-1.5 h-28">
-              {(() => {
-                const maxCount = Math.max(...allowed.trend_7d.map((p) => p.count), 1);
-                return allowed.trend_7d.map((point) => {
-                  const heightPct = Math.max((point.count / maxCount) * 100, 2);
-                  const d = new Date(point.date + "T00:00:00");
-                  const dayLabel = Number.isFinite(d.getTime())
-                    ? d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
-                    : point.date;
-                  const isToday =
-                    new Date().toISOString().slice(0, 10) === point.date;
-                  return (
-                    <div
-                      key={point.date}
-                      className="flex flex-1 flex-col items-center gap-1 h-full justify-end"
-                    >
-                      {point.count > 0 && (
-                        <span className="text-[10px] font-semibold text-gray-400 tabular-nums">
-                          {fmtInt(point.count)}
-                        </span>
-                      )}
-                      <div
-                        className={`w-full rounded-t-md transition-all ${isToday ? "bg-indigo-400" : "bg-gray-200"}`}
-                        style={{ height: `${heightPct}%` }}
-                        title={`${dayLabel}: ${fmtInt(point.count)}`}
-                      />
+            {(() => {
+              const granularity = allowed.trend_granularity;
+              const n = new Date();
+              const localToday = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+
+              // Monday of current local week (ISO: Mon=0)
+              const localMonday = (() => {
+                const offset = n.getDay() === 0 ? 6 : n.getDay() - 1;
+                const m = new Date(n);
+                m.setDate(n.getDate() - offset);
+                return `${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, "0")}-${String(m.getDate()).padStart(2, "0")}`;
+              })();
+
+              const localMonthPrefix = localToday.slice(0, 7); // "YYYY-MM"
+
+              function isCurrentPeriod(pointDate: string): boolean {
+                if (granularity === "day") return pointDate === localToday;
+                if (granularity === "week") return pointDate === localMonday;
+                return pointDate.slice(0, 7) === localMonthPrefix;
+              }
+
+              function currentPeriodLabel(): string {
+                if (granularity === "day") return "Today";
+                if (granularity === "week") return "This week";
+                return "This month";
+              }
+
+              function formatLabels(pointDate: string): { primary: string; secondary: string } {
+                const d = new Date(pointDate + "T00:00:00");
+                if (!Number.isFinite(d.getTime())) return { primary: pointDate, secondary: "" };
+                if (granularity === "day") {
+                  return {
+                    primary: d.toLocaleDateString(undefined, { weekday: "short" }),
+                    secondary: d.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+                  };
+                }
+                if (granularity === "week") {
+                  return {
+                    primary: d.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+                    secondary: "",
+                  };
+                }
+                // month
+                return {
+                  primary: d.toLocaleDateString(undefined, { month: "short" }),
+                  secondary: `'${String(d.getFullYear()).slice(2)}`,
+                };
+              }
+
+              function windowLabel(): string {
+                const count = allowed.trend.length;
+                if (granularity === "day") return `last ${count} days`;
+                if (granularity === "week") return `last ${count} weeks`;
+                return `last ${count} months`;
+              }
+
+              const maxCount = Math.max(...allowed.trend.map((p) => p.count), 1);
+              const totalCount = allowed.trend.reduce((s, p) => s + p.count, 0);
+              const rows = allowed.trend.map((point) => {
+                const current = isCurrentPeriod(point.date);
+                const labels = formatLabels(point.date);
+                const primaryLabel = current ? currentPeriodLabel() : labels.primary;
+                const secondaryLabel = current ? "" : labels.secondary;
+                const heightPct = point.count > 0 ? Math.max((point.count / maxCount) * 100, 8) : 0;
+                return { point, current, primaryLabel, secondaryLabel, tooltipLabel: labels.primary, heightPct };
+              });
+
+              return (
+                <>
+                  <div className="flex items-baseline justify-between">
+                    <div className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+                      When People Are Typing
                     </div>
-                  );
-                });
-              })()}
-            </div>
-            <div className="mt-1.5 flex justify-between gap-1.5">
-              {allowed.trend_7d.map((point) => {
-                const d = new Date(point.date + "T00:00:00");
-                const dayLabel = Number.isFinite(d.getTime())
-                  ? d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
-                  : point.date;
-                const isToday = new Date().toISOString().slice(0, 10) === point.date;
-                return (
-                  <div key={point.date} className="flex-1 text-center">
-                    <span className={`text-[10px] ${isToday ? "font-semibold text-indigo-500" : "text-gray-400"}`}>
-                      {dayLabel}
-                    </span>
+                    <div className="text-xs text-gray-400 tabular-nums">
+                      {fmtInt(totalCount)} posts · {windowLabel()}
+                    </div>
                   </div>
-                );
-              })}
-            </div>
+                  <div className="mt-4 flex items-end justify-between gap-1 h-28">
+                    {rows.map(({ point, current, primaryLabel, tooltipLabel, heightPct }) => (
+                      <div
+                        key={point.date}
+                        className="flex flex-1 flex-col items-center gap-1 h-full justify-end"
+                      >
+                        {point.count > 0 && (
+                          <span className="text-[10px] font-semibold text-gray-400 tabular-nums">
+                            {fmtInt(point.count)}
+                          </span>
+                        )}
+                        {heightPct > 0 ? (
+                          <div
+                            className={`w-full rounded-t-md transition-all ${current ? "bg-indigo-400" : "bg-gray-200"}`}
+                            style={{ height: `${heightPct}%` }}
+                            title={`${tooltipLabel}: ${fmtInt(point.count)}`}
+                          />
+                        ) : (
+                          <div className="w-full border-t border-dashed border-gray-200" />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-1.5 flex justify-between gap-1">
+                    {rows.map(({ point, current, primaryLabel, secondaryLabel }) => (
+                      <div key={point.date} className="flex-1 text-center">
+                        <div className={`text-[10px] leading-tight ${current ? "font-semibold text-indigo-500" : "text-gray-400"}`}>
+                          {primaryLabel}
+                        </div>
+                        {secondaryLabel && (
+                          <div className="text-[9px] text-gray-300 leading-tight">
+                            {secondaryLabel}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              );
+            })()}
           </section>
         ) : null}
 

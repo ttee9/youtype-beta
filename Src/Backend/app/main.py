@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
 import os
@@ -99,7 +99,8 @@ class AllowedResponse(BaseModel):
     submitted_post: SubmittedPost
     similar_count: int
     similarity_threshold: float
-    trend_7d: List[TrendPoint]
+    trend: List[TrendPoint]
+    trend_granularity: Literal["day", "week", "month"]
     common_phrases: List[str]
     examples: List[Example]
 
@@ -182,18 +183,56 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
         exclude_id=record["id"],
     )
 
-    # 4) Trend over last 7 days
+    # 4) Adaptive trend — granularity depends on how far back similar posts go
     today = _now_utc().date()
-    buckets: Dict[str, int] = {}
-    for i in range(7):
-        d = (today - timedelta(days=(6 - i))).isoformat()
-        buckets[d] = 0
 
+    post_dates: List[date] = []
     for p in scored_posts:
-        dt = datetime.fromisoformat(p["created_at"])
-        d = dt.date().isoformat()
-        if d in buckets:
-            buckets[d] += 1
+        try:
+            post_dates.append(datetime.fromisoformat(p["created_at"]).date())
+        except (ValueError, KeyError):
+            pass
+
+    oldest = min(post_dates) if post_dates else today
+    span_days = (today - oldest).days
+
+    buckets: Dict[str, int] = {}
+    granularity: str
+
+    if span_days <= 30:
+        granularity = "day"
+        num_buckets = max(7, span_days + 1)
+        for i in range(num_buckets):
+            buckets[(today - timedelta(days=(num_buckets - 1 - i))).isoformat()] = 0
+        for pd in post_dates:
+            key = pd.isoformat()
+            if key in buckets:
+                buckets[key] += 1
+
+    elif span_days <= 365:
+        granularity = "week"
+        num_weeks = min(16, span_days // 7 + 2)
+        week_start_today = today - timedelta(days=today.weekday())  # Monday of current week
+        for i in range(num_weeks):
+            ws = week_start_today - timedelta(weeks=(num_weeks - 1 - i))
+            buckets[ws.isoformat()] = 0
+        for pd in post_dates:
+            ws = (pd - timedelta(days=pd.weekday())).isoformat()
+            if ws in buckets:
+                buckets[ws] += 1
+
+    else:
+        granularity = "month"
+        num_months = min(24, span_days // 30 + 2)
+        total_months_today = today.year * 12 + (today.month - 1)
+        for i in range(num_months):
+            tm = total_months_today - (num_months - 1 - i)
+            y, m0 = divmod(tm, 12)
+            buckets[date(y, m0 + 1, 1).isoformat()] = 0
+        for pd in post_dates:
+            key = date(pd.year, pd.month, 1).isoformat()
+            if key in buckets:
+                buckets[key] += 1
 
     trend = [TrendPoint(date=d, count=buckets[d]) for d in sorted(buckets.keys())]
 
@@ -227,7 +266,8 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
         ),
         similar_count=len(scored_posts) + 1,  # Include the submitted post itself in the count
         similarity_threshold=threshold,
-        trend_7d=trend,
+        trend=trend,
+        trend_granularity=granularity,
         common_phrases=common_phrases,
         examples=examples,
     )
