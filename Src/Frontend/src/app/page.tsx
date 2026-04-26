@@ -448,7 +448,7 @@ export default function Page() {
               }
 
               function windowLabel(): string {
-                const count = allowed.trend.length;
+                const count = allowed!.trend.length;
                 if (granularity === "day") return `last ${count} days`;
                 if (granularity === "week") return `last ${count} weeks`;
                 return `last ${count} months`;
