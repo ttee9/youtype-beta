@@ -1,3 +1,6 @@
 {
-  "rootDirectory": "Src/Frontend"
+  "installCommand": "cd Src/Frontend && npm install",
+  "buildCommand": "cd Src/Frontend && npm run build",
+  "outputDirectory": "Src/Frontend/.next",
+  "framework": "nextjs"
 }
