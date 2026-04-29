@@ -19,8 +19,9 @@ from app.db import init_db, insert_post, fetch_posts, find_similar_posts
 
 load_dotenv()
 
-# Rate limiting setup
-limiter = Limiter(key_func=get_remote_address)
+# Rate limiting setup — moving-window prevents burst (all 10 tokens at once).
+# Note: memory:// storage is per-process; use Redis for multi-worker deployments.
+limiter = Limiter(key_func=get_remote_address, strategy="moving-window")
 
 app = FastAPI(title="YouType API")
 app.state.limiter = limiter
@@ -142,7 +143,7 @@ def delete_post(post_id: str):
     return {"ok": False, "error": "not_implemented"}
 
 @app.post("/submit", response_model=Union[AllowedResponse, RejectedResponse])
-@limiter.limit("10/minute")  # Rate limit: 10 submissions per minute per IP
+@limiter.limit("6/minute")  # ~1 per 10 seconds; moving-window enforces spacing
 async def submit(request: Request, payload: SubmitRequest = Body(...)):
     # 1) Moderation
     reason = is_low_quality(payload.text)
@@ -274,7 +275,7 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
 
 
 @app.post("/post")
-@limiter.limit("20/minute")  # Rate limit: 20 posts per minute per IP
+@limiter.limit("12/minute")  # ~1 per 5 seconds; moving-window enforces spacing
 async def post_only(request: Request, payload: PostOnlyRequest = Body(...)):
     """Persist text without embeddings/analysis (useful for simple posting)."""
     reason = is_low_quality(payload.text)
