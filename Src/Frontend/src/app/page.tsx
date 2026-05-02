@@ -131,15 +131,35 @@ export default function Page() {
   const [result, setResult] = useState<SubmitResponse | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
+  const [cooldownSec, setCooldownSec] = useState(0);
 
-  const canPost = useMemo(() => text.trim().length >= 5 && loading === "idle", [text, loading]);
-  const canAnalyze = useMemo(() => text.trim().length >= 10 && loading === "idle", [text, loading]);
+  useEffect(() => {
+    if (!cooldownUntil) return;
+    const tick = () => {
+      const remaining = Math.ceil((cooldownUntil - Date.now()) / 1000);
+      if (remaining <= 0) {
+        setCooldownUntil(null);
+        setCooldownSec(0);
+      } else {
+        setCooldownSec(remaining);
+      }
+    };
+    tick();
+    const id = setInterval(tick, 250);
+    return () => clearInterval(id);
+  }, [cooldownUntil]);
+
+  const canPost = useMemo(() => text.trim().length >= 5 && loading === "idle" && cooldownSec === 0, [text, loading, cooldownSec]);
+  const canAnalyze = useMemo(() => text.trim().length >= 10 && loading === "idle" && cooldownSec === 0, [text, loading, cooldownSec]);
 
   async function onPost() {
     if (!canPost) {
       setNotice(null);
       setResult(null);
-      if (text.trim().length < 5) {
+      if (cooldownSec > 0) {
+        setError(`Please wait ${cooldownSec} second${cooldownSec !== 1 ? "s" : ""} before submitting again.`);
+      } else if (text.trim().length < 5) {
         setError("Please enter at least 5 characters to post.");
       } else {
         setError("Please wait—an action is already in progress.");
@@ -176,6 +196,8 @@ export default function Page() {
       } else {
         setError("Unexpected response from server.");
       }
+      setCooldownUntil(Date.now() + 5000);
+      setCooldownSec(5);
     } catch (err) {
       console.error(err);
       setError("Couldn't reach backend. Is it running on :8000?");
@@ -187,7 +209,9 @@ export default function Page() {
   async function onAnalyze() {
     if (!canAnalyze) {
       setNotice(null);
-      if (text.trim().length < 10) {
+      if (cooldownSec > 0) {
+        setError(`Please wait ${cooldownSec} second${cooldownSec !== 1 ? "s" : ""} before submitting again.`);
+      } else if (text.trim().length < 10) {
         setError("Please enter at least 10 characters to analyze.");
       } else {
         setError("Please wait—an action is already in progress.");
@@ -218,6 +242,8 @@ export default function Page() {
 
       const data = await res.json();
       setResult(data);
+      setCooldownUntil(Date.now() + 10000);
+      setCooldownSec(10);
     } catch (err) {
       console.error(err);
       setError("Couldn't reach backend. Is it running on :8000?");
@@ -348,7 +374,7 @@ export default function Page() {
               disabled={!canPost}
               type="button"
             >
-              {loading === "posting" ? "Saving…" : "Type"}
+              {loading === "posting" ? "Saving…" : cooldownSec > 0 ? `Wait ${cooldownSec}s` : "Type"}
             </button>
             <button
               className="flex-1 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
@@ -356,7 +382,7 @@ export default function Page() {
               disabled={!canAnalyze}
               type="button"
             >
-              {loading === "analyzing" ? "Analyzing…" : "Analyze"}
+              {loading === "analyzing" ? "Analyzing…" : cooldownSec > 0 ? `Wait ${cooldownSec}s` : "Analyze"}
             </button>
           </div>
 
@@ -448,7 +474,7 @@ export default function Page() {
               }
 
               function windowLabel(): string {
-                const count = allowed.trend.length;
+                const count = allowed!.trend.length;
                 if (granularity === "day") return `last ${count} days`;
                 if (granularity === "week") return `last ${count} weeks`;
                 return `last ${count} months`;
