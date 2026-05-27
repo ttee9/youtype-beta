@@ -6,6 +6,8 @@
 node_modules/
 .next/
 .env*
+!.env.example
+!.env.local.example
 
 # Python virtual environments
 .venv/
