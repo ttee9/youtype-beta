@@ -174,7 +174,10 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
     }
 
     # Persist to Postgres
-    insert_post(post=record)
+    try:
+        insert_post(post=record)
+    except Exception:
+        return {"status": "rejected", "reason": "Could not save your submission. Please try again."}
 
     # 3) Find similar posts via pgvector cosine similarity
     threshold = 0.78
@@ -298,5 +301,8 @@ async def post_only(request: Request, payload: PostOnlyRequest = Body(...)):
         "created_at": created_at,
         "embedding": [],
     }
-    insert_post(post=record)
+    try:
+        insert_post(post=record)
+    except Exception:
+        return {"status": "rejected", "reason": "Could not save your submission. Please try again."}
     return {"status": "ok", "id": post_id, "created_at": created_at}

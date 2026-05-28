@@ -200,7 +200,7 @@ export default function Page() {
       setCooldownSec(5);
     } catch (err) {
       console.error(err);
-      setError("Couldn't reach backend. Is it running on :8000?");
+      setError("Couldn't reach the server. Please check your connection and try again.");
     } finally {
       setLoading("idle");
     }
@@ -246,7 +246,7 @@ export default function Page() {
       setCooldownSec(10);
     } catch (err) {
       console.error(err);
-      setError("Couldn't reach backend. Is it running on :8000?");
+      setError("Couldn't reach the server. Please check your connection and try again.");
     } finally {
       setLoading("idle");
     }
