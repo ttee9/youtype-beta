@@ -30,7 +30,6 @@ function mockResponse(): SubmitResponse {
 
   return {
     status: "allowed",
-    theme_label: "High rent in New York City",
     submitted_post: {
       id: "mock",
       text: "(mock) submitted text",
