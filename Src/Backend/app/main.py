@@ -96,7 +96,6 @@ class SubmittedPost(BaseModel):
 
 class AllowedResponse(BaseModel):
     status: Literal["allowed"] = "allowed"
-    theme_label: Optional[str] = None
     submitted_post: SubmittedPost
     similar_count: int
     similarity_threshold: float
@@ -258,10 +257,7 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
         for p in scored_posts[:5]
     ]
 
-    theme_label = "Semantic theme (MVP)"
-
     return AllowedResponse(
-        theme_label=theme_label,
         submitted_post=SubmittedPost(
             id=record["id"],
             text=record["text"],

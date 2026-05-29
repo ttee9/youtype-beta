@@ -10,7 +10,6 @@ type TrendPoint = { date: string; count: number };
 type SubmitResponse =
   | {
       status: "allowed";
-      theme_label?: string;
       submitted_post: { id: string; text: string; created_at: string; similarity: number };
       similar_count: number;
       similarity_threshold: number;
@@ -418,11 +417,6 @@ export default function Page() {
             <div className="mt-1.5 text-7xl font-black tabular-nums tracking-tight leading-none">
               {fmtInt(bigCount)}
             </div>
-            {allowed.theme_label && (
-              <div className="mt-4 inline-block rounded-full bg-white/10 px-3 py-1 text-xs text-gray-400">
-                {allowed.theme_label}
-              </div>
-            )}
           </div>
         )}
 
