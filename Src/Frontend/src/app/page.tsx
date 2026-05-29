@@ -413,7 +413,7 @@ export default function Page() {
         {allowed && (
           <div className="mt-4 rounded-2xl bg-gray-950 px-8 py-7 text-white">
             <div className="text-xs font-semibold uppercase tracking-widest text-gray-500">
-              People said something similar
+              Number of Similar Texts
             </div>
             <div className="mt-1.5 text-7xl font-black tabular-nums tracking-tight leading-none">
               {fmtInt(bigCount)}
