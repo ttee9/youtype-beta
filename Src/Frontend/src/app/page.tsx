@@ -410,7 +410,7 @@ export default function Page() {
 
         {/* Count hero */}
         {allowed && (
-          <div className="mt-4 rounded-2xl bg-gray-950 px-8 py-7 text-white">
+          <div className="mt-4 rounded-2xl bg-purple-700 px-8 py-7 text-white">
             <div className="text-xs font-semibold uppercase tracking-widest text-gray-500">
               Number of Similar Texts
             </div>
