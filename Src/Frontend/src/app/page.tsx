@@ -138,6 +138,7 @@ export default function Page() {
   const [result, setResult] = useState<SubmitResponse | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lastPosted, setLastPosted] = useState<{ id: string; text: string } | null>(null);
   const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
   const [cooldownSec, setCooldownSec] = useState(0);
 
@@ -177,6 +178,7 @@ export default function Page() {
     setNotice(null);
     setError(null);
     setResult(null);
+    setLastPosted(null);
     setLoading("posting");
 
     if (USE_MOCK) {
@@ -186,12 +188,14 @@ export default function Page() {
       return;
     }
 
+    const postedText = text.trim();
+
     try {
       const res = await fetch(`${API_BASE}/post`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          text: text.trim(),
+          text: postedText,
         }),
       });
       const data = await res.json();
@@ -200,6 +204,7 @@ export default function Page() {
         setError(data?.reason ?? "Rejected");
       } else if (data?.status === "ok") {
         setNotice("Posted successfully.");
+        setLastPosted({ id: data.id, text: postedText });
       } else {
         setError("Unexpected response from server.");
       }
@@ -230,6 +235,7 @@ export default function Page() {
     setError(null);
     setLoading("analyzing");
     setResult(null);
+    setLastPosted(null);
 
     if (USE_MOCK) {
       await new Promise((res) => setTimeout(res, 200));
@@ -308,6 +314,34 @@ export default function Page() {
     } catch {
       // Silently ignore — vote just won't update optimistically.
     }
+  }
+
+  function VoteButtons({ postId }: { postId: string }) {
+    const votes = voteState[postId];
+    return (
+      <span className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => handleVote(postId, 1)}
+          aria-label="Upvote this post"
+          className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+            votes?.userVote === 1 ? "bg-green-100 text-green-700" : "text-gray-400 hover:bg-gray-50"
+          }`}
+        >
+          ▲ {fmtInt(votes?.upvotes ?? 0)}
+        </button>
+        <button
+          type="button"
+          onClick={() => handleVote(postId, -1)}
+          aria-label="Downvote this post"
+          className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+            votes?.userVote === -1 ? "bg-red-100 text-red-700" : "text-gray-400 hover:bg-gray-50"
+          }`}
+        >
+          ▼ {fmtInt(votes?.downvotes ?? 0)}
+        </button>
+      </span>
+    );
   }
 
   const mostSimilarGroups = useMemo(() => {
@@ -453,6 +487,21 @@ export default function Page() {
             </div>
             <div className="mt-1.5 text-7xl font-black tabular-nums tracking-tight leading-none">
               {fmtInt(bigCount)}
+            </div>
+            <div className="mt-3 flex items-center justify-between">
+              <span className="text-xs text-purple-200">Your post</span>
+              <VoteButtons postId={allowed.submitted_post.id} />
+            </div>
+          </div>
+        )}
+
+        {/* Posted (Type flow) */}
+        {lastPosted && (
+          <div className="mt-4 rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
+            <p className="text-sm leading-relaxed text-gray-800 whitespace-pre-wrap break-words">{lastPosted.text}</p>
+            <div className="mt-2.5 flex items-center justify-between">
+              <span className="text-xs text-gray-400">just now</span>
+              <VoteButtons postId={lastPosted.id} />
             </div>
           </div>
         )}
@@ -612,48 +661,21 @@ export default function Page() {
               Recent Similar
             </div>
             <div className="space-y-2">
-              {mostRecentExamples.map((ex, idx) => {
-                const votes = voteState[ex.id];
-                const upvotes = votes?.upvotes ?? ex.upvotes;
-                const downvotes = votes?.downvotes ?? ex.downvotes;
-                return (
-                  <div
-                    key={`${ex.id}-${idx}`}
-                    className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm"
-                  >
-                    <p className="text-sm leading-relaxed text-gray-800 whitespace-pre-wrap break-words">{ex.text}</p>
-                    <div className="mt-2.5 flex flex-wrap items-center gap-2">
-                      <span className="text-xs text-gray-400">{relativeTime(ex.created_at)}</span>
-                      <span className="text-gray-200" aria-hidden="true">·</span>
-                      <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-semibold text-indigo-600">
-                        {Math.round(ex.similarity * 100)}% match
-                      </span>
-                      <span className="ml-auto flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => handleVote(ex.id, 1)}
-                          aria-label="Allow this post"
-                          className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                            votes?.userVote === 1 ? "bg-green-100 text-green-700" : "text-gray-400 hover:bg-gray-50"
-                          }`}
-                        >
-                          ▲ {fmtInt(upvotes)}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleVote(ex.id, -1)}
-                          aria-label="Block this post"
-                          className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                            votes?.userVote === -1 ? "bg-red-100 text-red-700" : "text-gray-400 hover:bg-gray-50"
-                          }`}
-                        >
-                          ▼ {fmtInt(downvotes)}
-                        </button>
-                      </span>
-                    </div>
+              {mostRecentExamples.map((ex, idx) => (
+                <div
+                  key={`${ex.id}-${idx}`}
+                  className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm"
+                >
+                  <p className="text-sm leading-relaxed text-gray-800 whitespace-pre-wrap break-words">{ex.text}</p>
+                  <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-gray-400">{relativeTime(ex.created_at)}</span>
+                    <span className="text-gray-200" aria-hidden="true">·</span>
+                    <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-semibold text-indigo-600">
+                      {Math.round(ex.similarity * 100)}% match
+                    </span>
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
           </div>
         ) : null}
