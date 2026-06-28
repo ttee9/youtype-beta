@@ -50,6 +50,14 @@ def init_db() -> None:
         conn.commit()
     Base.metadata.create_all(bind=engine)
 
+    # create_all only creates missing tables; it won't add columns to a
+    # "posts" table that already existed before voting was introduced.
+    with engine.connect() as conn:
+        conn.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS upvotes INTEGER NOT NULL DEFAULT 0"))
+        conn.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS downvotes INTEGER NOT NULL DEFAULT 0"))
+        conn.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS status VARCHAR NOT NULL DEFAULT 'active'"))
+        conn.commit()
+
 
 @contextmanager
 def session_scope() -> Iterator[Session]:
