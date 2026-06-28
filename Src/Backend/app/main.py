@@ -1,9 +1,10 @@
+import hashlib
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
 import os
 
-from fastapi import FastAPI, Request, Body
+from fastapi import FastAPI, HTTPException, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
@@ -15,7 +16,7 @@ from typing import Union
 
 from app.embeddings import embed_text
 from app.moderation import is_low_quality, moderate
-from app.db import init_db, insert_post, fetch_posts, find_similar_posts
+from app.db import cast_vote, init_db, insert_post, fetch_posts, find_similar_posts
 
 load_dotenv()
 
@@ -64,9 +65,12 @@ PostOnlyRequest.model_rebuild()
 
 
 class Example(BaseModel):
+    id: str
     text: str
     similarity: float
     created_at: str
+    upvotes: int = 0
+    downvotes: int = 0
 
 
 class TrendPoint(BaseModel):
@@ -79,6 +83,18 @@ class PostOut(BaseModel):
     text: str
     location: Optional[str] = None
     created_at: str
+    upvotes: int = 0
+    downvotes: int = 0
+
+
+class VoteRequest(BaseModel):
+    value: Literal[1, -1]
+
+
+class VoteResponse(BaseModel):
+    upvotes: int
+    downvotes: int
+    status: str
 
 
 class PostsResponse(BaseModel):
@@ -140,6 +156,22 @@ def delete_post(post_id: str):
     # Minimal MVP: we don't implement delete at DB layer yet.
     # (We'll add it when needed; leaving endpoint stubbed avoids breaking clients.)
     return {"ok": False, "error": "not_implemented"}
+
+
+@app.post("/posts/{post_id}/vote", response_model=VoteResponse)
+@limiter.limit("30/minute")
+def vote_post(request: Request, post_id: str, payload: VoteRequest = Body(...)):
+    """Cast (or change) an up/down vote on a post; one vote per IP per post.
+
+    Posts that accumulate enough net downvotes are hidden from feeds — this
+    is the community-moderation mechanism replacing fixed content rules.
+    """
+    ip = get_remote_address(request)
+    ip_hash = hashlib.sha256(ip.encode()).hexdigest()
+    result = cast_vote(post_id=post_id, ip_hash=ip_hash, value=payload.value)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Post not found")
+    return result
 
 @app.post("/submit", response_model=Union[AllowedResponse, RejectedResponse])
 @limiter.limit("6/minute")  # ~1 per 10 seconds; moving-window enforces spacing
@@ -250,9 +282,12 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
     # 6) Examples (top 5)
     examples = [
         Example(
+            id=p["id"],
             text=p["text"],
             similarity=round(p["similarity"], 2),
             created_at=p["created_at"],
+            upvotes=p.get("upvotes", 0),
+            downvotes=p.get("downvotes", 0),
         )
         for p in scored_posts[:5]
     ]
