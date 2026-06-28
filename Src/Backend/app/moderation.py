@@ -1,11 +1,5 @@
-import os
 import re
 from typing import Optional, Tuple
-from dotenv import load_dotenv
-from openai import AsyncOpenAI
-
-load_dotenv()
-client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Very lightweight PII patterns (MVP)
 EMAIL_RE = re.compile(r"\b[\w\.-]+@[\w\.-]+\.\w+\b")
@@ -61,24 +55,13 @@ def quick_rules(text: str) -> Optional[str]:
 
 async def moderate(text: str) -> Tuple[bool, Optional[str]]:
     """
-    Returns (allowed, reason_if_blocked)
+    Returns (allowed, reason_if_blocked).
+
+    Only basic hygiene (length, links, PII) is enforced here. Whether a post
+    stays visible beyond that is decided by community voting, not a fixed
+    content policy — see app.db.cast_vote / DOWNVOTE_HIDE_THRESHOLD.
     """
-    # 1) Fast checks
     reason = quick_rules(text)
     if reason:
         return False, reason
-
-    # 2) OpenAI Moderation
-    try:
-        resp = await client.moderations.create(
-            model="omni-moderation-latest",
-            input=text
-        )
-        r = resp.results[0]
-    except Exception as e:
-        raise RuntimeError(f"Moderation request failed: {e}") from e
-
-    if r.flagged:
-        return False, "This content isn’t allowed."
-
     return True, None
