@@ -51,8 +51,8 @@ def quick_rules(text: str) -> Optional[str]:
     t = text.strip()
     if len(t) < 3:
         return "Text is too short."
-    if len(t) > 1000:
-        return "Text is too long (max 1000 characters)."
+    if len(t) > 5000:
+        return "Text is too long (max 5000 characters)."
     if URL_RE.search(t):
         return "Links aren’t allowed right now."
     if EMAIL_RE.search(t) or PHONE_RE.search(t):

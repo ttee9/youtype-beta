@@ -27,8 +27,8 @@ Your app is now ready for MVP deployment. Here's what was implemented:
    - Easy to enable when ready
 
 5. **Rate Limiting**
-   - `/submit`: 10 requests/minute per IP (protects OpenAI costs)
-   - `/post`: 20 requests/minute per IP
+   - `/submit`: 6 requests/minute per IP (protects OpenAI costs)
+   - `/post`: 12 requests/minute per IP
    - Automatic 429 responses when exceeded
 
 ---

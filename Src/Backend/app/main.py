@@ -96,7 +96,6 @@ class SubmittedPost(BaseModel):
 
 class AllowedResponse(BaseModel):
     status: Literal["allowed"] = "allowed"
-    theme_label: Optional[str] = None
     submitted_post: SubmittedPost
     similar_count: int
     similarity_threshold: float
@@ -174,7 +173,10 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
     }
 
     # Persist to Postgres
-    insert_post(post=record)
+    try:
+        insert_post(post=record)
+    except Exception:
+        return {"status": "rejected", "reason": "Could not save your submission. Please try again."}
 
     # 3) Find similar posts via pgvector cosine similarity
     threshold = 0.78
@@ -255,10 +257,7 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
         for p in scored_posts[:5]
     ]
 
-    theme_label = "Semantic theme (MVP)"
-
     return AllowedResponse(
-        theme_label=theme_label,
         submitted_post=SubmittedPost(
             id=record["id"],
             text=record["text"],
@@ -298,5 +297,8 @@ async def post_only(request: Request, payload: PostOnlyRequest = Body(...)):
         "created_at": created_at,
         "embedding": [],
     }
-    insert_post(post=record)
+    try:
+        insert_post(post=record)
+    except Exception:
+        return {"status": "rejected", "reason": "Could not save your submission. Please try again."}
     return {"status": "ok", "id": post_id, "created_at": created_at}

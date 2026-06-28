@@ -11,7 +11,7 @@ load_dotenv()
 
 EMBEDDING_DIM = 1536  # text-embedding-3-small
 
-engine = create_engine(os.getenv("DATABASE_URL", ""), future=True)
+engine = create_engine(os.getenv("DATABASE_URL"), future=True)
 
 
 class Base(DeclarativeBase):

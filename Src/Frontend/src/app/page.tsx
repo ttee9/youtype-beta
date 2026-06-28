@@ -10,7 +10,6 @@ type TrendPoint = { date: string; count: number };
 type SubmitResponse =
   | {
       status: "allowed";
-      theme_label?: string;
       submitted_post: { id: string; text: string; created_at: string; similarity: number };
       similar_count: number;
       similarity_threshold: number;
@@ -31,7 +30,6 @@ function mockResponse(): SubmitResponse {
 
   return {
     status: "allowed",
-    theme_label: "High rent in New York City",
     submitted_post: {
       id: "mock",
       text: "(mock) submitted text",
@@ -200,7 +198,7 @@ export default function Page() {
       setCooldownSec(5);
     } catch (err) {
       console.error(err);
-      setError("Couldn't reach backend. Is it running on :8000?");
+      setError("Couldn't reach the server. Please check your connection and try again.");
     } finally {
       setLoading("idle");
     }
@@ -246,7 +244,7 @@ export default function Page() {
       setCooldownSec(10);
     } catch (err) {
       console.error(err);
-      setError("Couldn't reach backend. Is it running on :8000?");
+      setError("Couldn't reach the server. Please check your connection and try again.");
     } finally {
       setLoading("idle");
     }
@@ -369,7 +367,7 @@ export default function Page() {
           />
           <div className="mt-3 flex gap-2">
             <button
-              className="rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex-1 rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
               onClick={onPost}
               disabled={!canPost}
               type="button"
@@ -411,18 +409,13 @@ export default function Page() {
 
         {/* Count hero */}
         {allowed && (
-          <div className="mt-4 rounded-2xl bg-gray-950 px-8 py-7 text-white">
+          <div className="mt-4 rounded-2xl bg-purple-700 px-8 py-7 text-white">
             <div className="text-xs font-semibold uppercase tracking-widest text-gray-500">
-              People said something similar
+              Number of Similar Texts
             </div>
             <div className="mt-1.5 text-7xl font-black tabular-nums tracking-tight leading-none">
               {fmtInt(bigCount)}
             </div>
-            {allowed.theme_label && (
-              <div className="mt-4 inline-block rounded-full bg-white/10 px-3 py-1 text-xs text-gray-400">
-                {allowed.theme_label}
-              </div>
-            )}
           </div>
         )}
 
