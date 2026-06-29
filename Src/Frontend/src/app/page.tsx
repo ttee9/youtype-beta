@@ -134,92 +134,18 @@ function useCountUp(target: number, opts?: { durationMs?: number }) {
 
 export default function Page() {
   const [text, setText] = useState("");
-  const [loading, setLoading] = useState<"idle" | "posting" | "analyzing">("idle");
+  const [loading, setLoading] = useState<"idle" | "analyzing">("idle");
   const [result, setResult] = useState<SubmitResponse | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
-  const [cooldownSec, setCooldownSec] = useState(0);
 
-  useEffect(() => {
-    if (!cooldownUntil) return;
-    const tick = () => {
-      const remaining = Math.ceil((cooldownUntil - Date.now()) / 1000);
-      if (remaining <= 0) {
-        setCooldownUntil(null);
-        setCooldownSec(0);
-      } else {
-        setCooldownSec(remaining);
-      }
-    };
-    tick();
-    const id = setInterval(tick, 250);
-    return () => clearInterval(id);
-  }, [cooldownUntil]);
-
-  const canPost = useMemo(() => text.trim().length >= 5 && loading === "idle" && cooldownSec === 0, [text, loading, cooldownSec]);
-  const canAnalyze = useMemo(() => text.trim().length >= 10 && loading === "idle" && cooldownSec === 0, [text, loading, cooldownSec]);
-
-  async function onPost() {
-    if (!canPost) {
-      setNotice(null);
-      setResult(null);
-      if (cooldownSec > 0) {
-        setError(`Please wait ${cooldownSec} second${cooldownSec !== 1 ? "s" : ""} before submitting again.`);
-      } else if (text.trim().length < 5) {
-        setError("Please enter at least 5 characters to post.");
-      } else {
-        setError("Please wait—an action is already in progress.");
-      }
-      return;
-    }
-
-    setNotice(null);
-    setError(null);
-    setResult(null);
-    setLoading("posting");
-
-    if (USE_MOCK) {
-      await new Promise((res) => setTimeout(res, 150));
-      setNotice("Saved (mock). ");
-      setLoading("idle");
-      return;
-    }
-
-    try {
-      const res = await fetch(`${API_BASE}/post`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: text.trim(),
-        }),
-      });
-      const data = await res.json();
-
-      if (data?.status === "rejected") {
-        setError(data?.reason ?? "Rejected");
-      } else if (data?.status === "ok") {
-        setNotice("Posted successfully.");
-      } else {
-        setError("Unexpected response from server.");
-      }
-      setCooldownUntil(Date.now() + 5000);
-      setCooldownSec(5);
-    } catch (err) {
-      console.error(err);
-      setError("Couldn't reach the server. Please check your connection and try again.");
-    } finally {
-      setLoading("idle");
-    }
-  }
+  const canAnalyze = useMemo(() => text.trim().length >= 5 && loading === "idle", [text, loading]);
 
   async function onAnalyze() {
     if (!canAnalyze) {
       setNotice(null);
-      if (cooldownSec > 0) {
-        setError(`Please wait ${cooldownSec} second${cooldownSec !== 1 ? "s" : ""} before submitting again.`);
-      } else if (text.trim().length < 10) {
-        setError("Please enter at least 10 characters to analyze.");
+      if (text.trim().length < 5) {
+        setError("Please enter at least 5 characters to analyze.");
       } else {
         setError("Please wait—an action is already in progress.");
       }
@@ -247,10 +173,13 @@ export default function Page() {
         }),
       });
 
+      if (res.status === 429) {
+        setError("You're submitting too quickly — please wait a moment and try again.");
+        return;
+      }
+
       const data = await res.json();
       setResult(data);
-      setCooldownUntil(Date.now() + 10000);
-      setCooldownSec(10);
     } catch (err) {
       console.error(err);
       setError("Couldn't reach the server. Please check your connection and try again.");
@@ -405,20 +334,12 @@ export default function Page() {
           />
           <div className="mt-3 flex gap-2">
             <button
-              className="flex-1 rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
-              onClick={onPost}
-              disabled={!canPost}
-              type="button"
-            >
-              {loading === "posting" ? "Saving…" : cooldownSec > 0 ? `Wait ${cooldownSec}s` : "Type"}
-            </button>
-            <button
               className="flex-1 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
               onClick={onAnalyze}
               disabled={!canAnalyze}
               type="button"
             >
-              {loading === "analyzing" ? "Analyzing…" : cooldownSec > 0 ? `Wait ${cooldownSec}s` : "Analyze"}
+              {loading === "analyzing" ? "Analyzing…" : "Analyze"}
             </button>
           </div>
 
