@@ -194,7 +194,7 @@ export default function Page() {
   const bigCount = useCountUp(allowed?.similar_count ?? 0, { durationMs: 1100 });
 
   const displayExamples = useMemo<
-    Array<{ id: string; text: string; similarity: number; created_at: string; upvotes: number; downvotes: number }>
+    Array<{ id: string; text: string; similarity: number; created_at: string }>
   >(() => {
     if (!allowed) return [];
     const base = Array.isArray(allowed.examples) ? allowed.examples : [];
@@ -205,8 +205,6 @@ export default function Page() {
             text: allowed.submitted_post.text,
             similarity: allowed.submitted_post.similarity,
             created_at: allowed.submitted_post.created_at,
-            upvotes: 0,
-            downvotes: 0,
           },
         ]
       : [];
@@ -214,30 +212,9 @@ export default function Page() {
     // Put the submitted post first so it reliably appears in both lists.
     return [
       ...submitted,
-      ...base.map((ex) => ({ ...ex, upvotes: ex.upvotes ?? 0, downvotes: ex.downvotes ?? 0 })),
+      ...base.map((ex) => ({ id: ex.id, text: ex.text, similarity: ex.similarity, created_at: ex.created_at })),
     ];
   }, [allowed]);
-
-  const [voteState, setVoteState] = useState<Record<string, { upvotes: number; downvotes: number; userVote: 1 | -1 }>>({});
-
-  async function handleVote(postId: string, value: 1 | -1) {
-    if (!postId || postId.startsWith("mock-")) return;
-    try {
-      const res = await fetch(`${API_BASE}/posts/${postId}/vote`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ value }),
-      });
-      if (!res.ok) return;
-      const data: { upvotes: number; downvotes: number; status: string } = await res.json();
-      setVoteState((prev) => ({
-        ...prev,
-        [postId]: { upvotes: data.upvotes, downvotes: data.downvotes, userVote: value },
-      }));
-    } catch {
-      // Silently ignore — vote just won't update optimistically.
-    }
-  }
 
   const mostSimilarGroups = useMemo(() => {
     if (!displayExamples.length) return [];
@@ -533,48 +510,21 @@ export default function Page() {
               Recent Similar
             </div>
             <div className="space-y-2">
-              {mostRecentExamples.map((ex, idx) => {
-                const votes = voteState[ex.id];
-                const upvotes = votes?.upvotes ?? ex.upvotes;
-                const downvotes = votes?.downvotes ?? ex.downvotes;
-                return (
-                  <div
-                    key={`${ex.id}-${idx}`}
-                    className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm"
-                  >
-                    <p className="text-sm leading-relaxed text-gray-800 whitespace-pre-wrap break-words">{ex.text}</p>
-                    <div className="mt-2.5 flex flex-wrap items-center gap-2">
-                      <span className="text-xs text-gray-400">{relativeTime(ex.created_at)}</span>
-                      <span className="text-gray-200" aria-hidden="true">·</span>
-                      <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-semibold text-indigo-600">
-                        {Math.round(ex.similarity * 100)}% match
-                      </span>
-                      <span className="ml-auto flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => handleVote(ex.id, 1)}
-                          aria-label="Allow this post"
-                          className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                            votes?.userVote === 1 ? "bg-green-100 text-green-700" : "text-gray-400 hover:bg-gray-50"
-                          }`}
-                        >
-                          ▲ {fmtInt(upvotes)}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleVote(ex.id, -1)}
-                          aria-label="Block this post"
-                          className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                            votes?.userVote === -1 ? "bg-red-100 text-red-700" : "text-gray-400 hover:bg-gray-50"
-                          }`}
-                        >
-                          ▼ {fmtInt(downvotes)}
-                        </button>
-                      </span>
-                    </div>
+              {mostRecentExamples.map((ex, idx) => (
+                <div
+                  key={`${ex.id}-${idx}`}
+                  className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm"
+                >
+                  <p className="text-sm leading-relaxed text-gray-800 whitespace-pre-wrap break-words">{ex.text}</p>
+                  <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-gray-400">{relativeTime(ex.created_at)}</span>
+                    <span className="text-gray-200" aria-hidden="true">·</span>
+                    <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-semibold text-indigo-600">
+                      {Math.round(ex.similarity * 100)}% match
+                    </span>
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
           </div>
         ) : null}
