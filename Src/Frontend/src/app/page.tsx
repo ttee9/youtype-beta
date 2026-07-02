@@ -138,6 +138,7 @@ export default function Page() {
   const [result, setResult] = useState<SubmitResponse | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lastPosted, setLastPosted] = useState<{ id: string; text: string } | null>(null);
   const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
   const [cooldownSec, setCooldownSec] = useState(0);
 
@@ -177,6 +178,7 @@ export default function Page() {
     setNotice(null);
     setError(null);
     setResult(null);
+    setLastPosted(null);
     setLoading("posting");
 
     if (USE_MOCK) {
@@ -185,6 +187,8 @@ export default function Page() {
       setLoading("idle");
       return;
     }
+
+    const postedText = text.trim();
 
     try {
       const res = await fetch(`${API_BASE}/post`, {
@@ -197,6 +201,7 @@ export default function Page() {
         setError(data?.reason ?? "Rejected");
       } else if (data?.status === "ok") {
         setNotice("Posted successfully.");
+        setLastPosted({ id: data.id, text: postedText });
       } else {
         setError("Unexpected response from server.");
       }
@@ -227,6 +232,7 @@ export default function Page() {
     setError(null);
     setLoading("analyzing");
     setResult(null);
+    setLastPosted(null);
 
     if (USE_MOCK) {
       await new Promise((res) => setTimeout(res, 200));
@@ -430,6 +436,21 @@ export default function Page() {
             </div>
             <div className="mt-1.5 text-7xl font-black tabular-nums tracking-tight leading-none">
               {fmtInt(bigCount)}
+            </div>
+            <div className="mt-3 flex items-center justify-between">
+              <span className="text-xs text-purple-200">Your post</span>
+              <VoteButtons postId={allowed.submitted_post.id} />
+            </div>
+          </div>
+        )}
+
+        {/* Posted (Type flow) */}
+        {lastPosted && (
+          <div className="mt-4 rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
+            <p className="text-sm leading-relaxed text-gray-800 whitespace-pre-wrap break-words">{lastPosted.text}</p>
+            <div className="mt-2.5 flex items-center justify-between">
+              <span className="text-xs text-gray-400">just now</span>
+              <VoteButtons postId={lastPosted.id} />
             </div>
           </div>
         )}
