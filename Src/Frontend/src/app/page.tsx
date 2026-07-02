@@ -437,9 +437,8 @@ export default function Page() {
             <div className="mt-1.5 text-7xl font-black tabular-nums tracking-tight leading-none">
               {fmtInt(bigCount)}
             </div>
-            <div className="mt-3 flex items-center justify-between">
+            <div className="mt-3">
               <span className="text-xs text-purple-200">Your post</span>
-              <VoteButtons postId={allowed.submitted_post.id} />
             </div>
           </div>
         )}
@@ -448,9 +447,8 @@ export default function Page() {
         {lastPosted && (
           <div className="mt-4 rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
             <p className="text-sm leading-relaxed text-gray-800 whitespace-pre-wrap break-words">{lastPosted.text}</p>
-            <div className="mt-2.5 flex items-center justify-between">
+            <div className="mt-2.5">
               <span className="text-xs text-gray-400">just now</span>
-              <VoteButtons postId={lastPosted.id} />
             </div>
           </div>
         )}
