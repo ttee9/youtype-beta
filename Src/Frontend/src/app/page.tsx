@@ -159,7 +159,7 @@ export default function Page() {
   }, [cooldownUntil]);
 
   const canPost = useMemo(() => text.trim().length >= 5 && loading === "idle" && cooldownSec === 0, [text, loading, cooldownSec]);
-  const canAnalyze = useMemo(() => text.trim().length >= 10 && loading === "idle" && cooldownSec === 0, [text, loading, cooldownSec]);
+  const canSearch = useMemo(() => text.trim().length >= 10 && loading === "idle" && cooldownSec === 0, [text, loading, cooldownSec]);
 
   async function onPost() {
     if (!canPost) {
@@ -183,7 +183,7 @@ export default function Page() {
 
     if (USE_MOCK) {
       await new Promise((res) => setTimeout(res, 150));
-      setNotice("Saved (mock). ");
+      setNotice("Saved (mock).");
       setLoading("idle");
       return;
     }
@@ -194,12 +194,9 @@ export default function Page() {
       const res = await fetch(`${API_BASE}/post`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: postedText,
-        }),
+        body: JSON.stringify({ text: text.trim() }),
       });
       const data = await res.json();
-
       if (data?.status === "rejected") {
         setError(data?.reason ?? "Rejected");
       } else if (data?.status === "ok") {
@@ -218,13 +215,13 @@ export default function Page() {
     }
   }
 
-  async function onAnalyze() {
-    if (!canAnalyze) {
+  async function onSearch() {
+    if (!canSearch) {
       setNotice(null);
       if (cooldownSec > 0) {
         setError(`Please wait ${cooldownSec} second${cooldownSec !== 1 ? "s" : ""} before submitting again.`);
       } else if (text.trim().length < 10) {
-        setError("Please enter at least 10 characters to analyze.");
+        setError("Please enter at least 10 characters to search.");
       } else {
         setError("Please wait—an action is already in progress.");
       }
@@ -248,10 +245,13 @@ export default function Page() {
       const res = await fetch(`${API_BASE}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: text.trim(),
-        }),
+        body: JSON.stringify({ text: text.trim() }),
       });
+
+      if (res.status === 429) {
+        setError("You're submitting too quickly — please wait a moment and try again.");
+        return;
+      }
 
       const data = await res.json();
       setResult(data);
@@ -271,7 +271,7 @@ export default function Page() {
   const bigCount = useCountUp(allowed?.similar_count ?? 0, { durationMs: 1100 });
 
   const displayExamples = useMemo<
-    Array<{ id: string; text: string; similarity: number; created_at: string; upvotes: number; downvotes: number }>
+    Array<{ id: string; text: string; similarity: number; created_at: string }>
   >(() => {
     if (!allowed) return [];
     const base = Array.isArray(allowed.examples) ? allowed.examples : [];
@@ -282,8 +282,6 @@ export default function Page() {
             text: allowed.submitted_post.text,
             similarity: allowed.submitted_post.similarity,
             created_at: allowed.submitted_post.created_at,
-            upvotes: 0,
-            downvotes: 0,
           },
         ]
       : [];
@@ -291,58 +289,9 @@ export default function Page() {
     // Put the submitted post first so it reliably appears in both lists.
     return [
       ...submitted,
-      ...base.map((ex) => ({ ...ex, upvotes: ex.upvotes ?? 0, downvotes: ex.downvotes ?? 0 })),
+      ...base.map((ex) => ({ id: ex.id, text: ex.text, similarity: ex.similarity, created_at: ex.created_at })),
     ];
   }, [allowed]);
-
-  const [voteState, setVoteState] = useState<Record<string, { upvotes: number; downvotes: number; userVote: 1 | -1 }>>({});
-
-  async function handleVote(postId: string, value: 1 | -1) {
-    if (!postId || postId.startsWith("mock-")) return;
-    try {
-      const res = await fetch(`${API_BASE}/posts/${postId}/vote`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ value }),
-      });
-      if (!res.ok) return;
-      const data: { upvotes: number; downvotes: number; status: string } = await res.json();
-      setVoteState((prev) => ({
-        ...prev,
-        [postId]: { upvotes: data.upvotes, downvotes: data.downvotes, userVote: value },
-      }));
-    } catch {
-      // Silently ignore — vote just won't update optimistically.
-    }
-  }
-
-  function VoteButtons({ postId }: { postId: string }) {
-    const votes = voteState[postId];
-    return (
-      <span className="flex items-center gap-1">
-        <button
-          type="button"
-          onClick={() => handleVote(postId, 1)}
-          aria-label="Upvote this post"
-          className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-            votes?.userVote === 1 ? "bg-green-100 text-green-700" : "text-gray-400 hover:bg-gray-50"
-          }`}
-        >
-          ▲ {fmtInt(votes?.upvotes ?? 0)}
-        </button>
-        <button
-          type="button"
-          onClick={() => handleVote(postId, -1)}
-          aria-label="Downvote this post"
-          className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-            votes?.userVote === -1 ? "bg-red-100 text-red-700" : "text-gray-400 hover:bg-gray-50"
-          }`}
-        >
-          ▼ {fmtInt(votes?.downvotes ?? 0)}
-        </button>
-      </span>
-    );
-  }
 
   const mostSimilarGroups = useMemo(() => {
     if (!displayExamples.length) return [];
@@ -448,11 +397,11 @@ export default function Page() {
             </button>
             <button
               className="flex-1 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
-              onClick={onAnalyze}
-              disabled={!canAnalyze}
+              onClick={onSearch}
+              disabled={!canSearch}
               type="button"
             >
-              {loading === "analyzing" ? "Analyzing…" : cooldownSec > 0 ? `Wait ${cooldownSec}s` : "Analyze"}
+              {loading === "analyzing" ? "Searching…" : cooldownSec > 0 ? `Wait ${cooldownSec}s` : "Search"}
             </button>
           </div>
 
