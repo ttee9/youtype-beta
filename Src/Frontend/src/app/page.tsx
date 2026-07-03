@@ -139,35 +139,15 @@ export default function Page() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastPosted, setLastPosted] = useState<{ id: string; text: string } | null>(null);
-  const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
-  const [cooldownSec, setCooldownSec] = useState(0);
 
-  useEffect(() => {
-    if (!cooldownUntil) return;
-    const tick = () => {
-      const remaining = Math.ceil((cooldownUntil - Date.now()) / 1000);
-      if (remaining <= 0) {
-        setCooldownUntil(null);
-        setCooldownSec(0);
-      } else {
-        setCooldownSec(remaining);
-      }
-    };
-    tick();
-    const id = setInterval(tick, 250);
-    return () => clearInterval(id);
-  }, [cooldownUntil]);
-
-  const canPost = useMemo(() => text.trim().length >= 5 && loading === "idle" && cooldownSec === 0, [text, loading, cooldownSec]);
-  const canSearch = useMemo(() => text.trim().length >= 10 && loading === "idle" && cooldownSec === 0, [text, loading, cooldownSec]);
+  const canPost = useMemo(() => text.trim().length >= 5 && loading === "idle", [text, loading]);
+  const canSearch = useMemo(() => text.trim().length >= 10 && loading === "idle", [text, loading]);
 
   async function onPost() {
     if (!canPost) {
       setNotice(null);
       setResult(null);
-      if (cooldownSec > 0) {
-        setError(`Please wait ${cooldownSec} second${cooldownSec !== 1 ? "s" : ""} before submitting again.`);
-      } else if (text.trim().length < 5) {
+      if (text.trim().length < 5) {
         setError("Please enter at least 5 characters to post.");
       } else {
         setError("Please wait—an action is already in progress.");
@@ -205,8 +185,6 @@ export default function Page() {
       } else {
         setError("Unexpected response from server.");
       }
-      setCooldownUntil(Date.now() + 5000);
-      setCooldownSec(5);
     } catch (err) {
       console.error(err);
       setError("Couldn't reach the server. Please check your connection and try again.");
@@ -218,9 +196,7 @@ export default function Page() {
   async function onSearch() {
     if (!canSearch) {
       setNotice(null);
-      if (cooldownSec > 0) {
-        setError(`Please wait ${cooldownSec} second${cooldownSec !== 1 ? "s" : ""} before submitting again.`);
-      } else if (text.trim().length < 10) {
+      if (text.trim().length < 10) {
         setError("Please enter at least 10 characters to search.");
       } else {
         setError("Please wait—an action is already in progress.");
@@ -255,8 +231,6 @@ export default function Page() {
 
       const data = await res.json();
       setResult(data);
-      setCooldownUntil(Date.now() + 10000);
-      setCooldownSec(10);
     } catch (err) {
       console.error(err);
       setError("Couldn't reach the server. Please check your connection and try again.");
@@ -393,7 +367,7 @@ export default function Page() {
               disabled={!canPost}
               type="button"
             >
-              {loading === "posting" ? "Saving…" : cooldownSec > 0 ? `Wait ${cooldownSec}s` : "Type"}
+              {loading === "posting" ? "Saving…" : "Type"}
             </button>
             <button
               className="flex-1 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
@@ -401,7 +375,7 @@ export default function Page() {
               disabled={!canSearch}
               type="button"
             >
-              {loading === "analyzing" ? "Searching…" : cooldownSec > 0 ? `Wait ${cooldownSec}s` : "Search"}
+              {loading === "analyzing" ? "Searching…" : "Search"}
             </button>
           </div>
 
