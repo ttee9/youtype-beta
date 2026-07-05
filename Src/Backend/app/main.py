@@ -88,13 +88,16 @@ class PostOut(BaseModel):
 
 
 class VoteRequest(BaseModel):
-    value: Literal[1, -1]
+    value: Literal[1, -1]  # 1 = Allow, -1 = Block
 
 
 class VoteResponse(BaseModel):
-    upvotes: int
-    downvotes: int
-    status: str
+    allow_votes: int
+    block_votes: int
+    total_votes: int
+    status: Literal["active", "blocked"]
+    user_vote: Literal[1, -1]
+    already_voted: bool
 
 
 class PostsResponse(BaseModel):
@@ -161,10 +164,12 @@ def delete_post(post_id: str):
 @app.post("/posts/{post_id}/vote", response_model=VoteResponse)
 @limiter.limit("30/minute")
 def vote_post(request: Request, post_id: str, payload: VoteRequest = Body(...)):
-    """Cast (or change) an up/down vote on a post; one vote per IP per post.
+    """Cast an Allow/Block vote on a post; exactly one vote per IP per post.
 
-    Posts that accumulate enough net downvotes are hidden from feeds — this
-    is the community-moderation mechanism replacing fixed content rules.
+    A post is blocked (hidden from feeds and similarity search) once it has
+    at least BLOCK_MIN_VOTES total votes and at least BLOCK_VOTE_RATIO of
+    them are Block votes. This is the community-moderation mechanism
+    replacing fixed content rules.
     """
     ip = get_remote_address(request)
     ip_hash = hashlib.sha256(ip.encode()).hexdigest()

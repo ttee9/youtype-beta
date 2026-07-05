@@ -11,8 +11,10 @@ load_dotenv()
 
 EMBEDDING_DIM = 1536  # text-embedding-3-small
 
-# Net downvotes (downvotes - upvotes) at which a post is auto-hidden from feeds.
-DOWNVOTE_HIDE_THRESHOLD = 5
+# A post is blocked once it has at least this many total Allow/Block votes
+# and at least this fraction of them are Block votes.
+BLOCK_MIN_VOTES = 20
+BLOCK_VOTE_RATIO = 0.65
 
 engine = create_engine(os.getenv("DATABASE_URL"), future=True)
 
@@ -135,9 +137,11 @@ def fetch_posts(*, limit: int = 500) -> List[Dict[str, Any]]:
 
 
 def cast_vote(*, post_id: str, ip_hash: str, value: int) -> Optional[Dict[str, Any]]:
-    """Record or update a vote for a post from a given ip_hash, then recompute counts.
+    """Record a single Allow(1)/Block(-1) vote for a post from a given ip_hash.
 
-    Returns the updated {upvotes, downvotes, status} or None if the post doesn't exist.
+    Each ip_hash may vote on a post exactly once; a repeat attempt does not
+    change the recorded vote and is reported back via `already_voted`.
+    Returns None if the post doesn't exist.
     """
     with session_scope() as session:
         post = session.get(Post, post_id)
@@ -149,27 +153,40 @@ def cast_vote(*, post_id: str, ip_hash: str, value: int) -> Optional[Dict[str, A
             .filter(Vote.post_id == post_id, Vote.ip_hash == ip_hash)
             .one_or_none()
         )
-        if existing is None:
+        already_voted = existing is not None
+        if not already_voted:
             session.add(Vote(post_id=post_id, ip_hash=ip_hash, value=value))
-        elif existing.value != value:
-            existing.value = value
-        session.flush()
+            session.flush()
 
-        upvotes = (
+        allow_votes = (
             session.query(func.count())
             .filter(Vote.post_id == post_id, Vote.value == 1)
             .scalar()
         )
-        downvotes = (
+        block_votes = (
             session.query(func.count())
             .filter(Vote.post_id == post_id, Vote.value == -1)
             .scalar()
         )
+        total_votes = allow_votes + block_votes
 
-        post.upvotes = upvotes
-        post.downvotes = downvotes
-        if downvotes - upvotes >= DOWNVOTE_HIDE_THRESHOLD:
-            post.status = "hidden"
+        post.upvotes = allow_votes
+        post.downvotes = block_votes
+        # Blocking is one-way: once a post is blocked it stays blocked, even
+        # if later Allow votes would bring the ratio back down.
+        if (
+            post.status == "active"
+            and total_votes >= BLOCK_MIN_VOTES
+            and block_votes / total_votes >= BLOCK_VOTE_RATIO
+        ):
+            post.status = "blocked"
 
         session.commit()
-        return {"upvotes": post.upvotes, "downvotes": post.downvotes, "status": post.status}
+        return {
+            "allow_votes": allow_votes,
+            "block_votes": block_votes,
+            "total_votes": total_votes,
+            "status": post.status,
+            "user_vote": existing.value if already_voted else value,
+            "already_voted": already_voted,
+        }
