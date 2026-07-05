@@ -152,6 +152,7 @@ type VoteState = {
   blockVotes: number;
   userVote: 1 | -1 | null;
   blocked: boolean;
+  affectedCount: number;
 };
 
 export default function Page() {
@@ -249,6 +250,7 @@ export default function Page() {
           blockVotes: mock.top_match.block_votes,
           userVote: mock.top_match.user_vote,
           blocked: mock.top_match.status === "blocked",
+          affectedCount: mock.similar_count,
         });
       }
       setLoading("idle");
@@ -276,6 +278,7 @@ export default function Page() {
           blockVotes: tm.block_votes ?? 0,
           userVote: tm.user_vote ?? null,
           blocked: tm.status === "blocked",
+          affectedCount: data.similar_count ?? 1,
         });
       }
     } catch (err) {
@@ -308,6 +311,7 @@ export default function Page() {
         blockVotes: data.block_votes,
         userVote: data.user_vote,
         blocked: data.status === "blocked",
+        affectedCount: data.affected_count ?? 1,
       });
     } catch (err) {
       console.error(err);
@@ -478,7 +482,12 @@ export default function Page() {
               </div>
             </div>
             <p className="mt-1 text-xs text-gray-400">
-              Voting on the closest match: &ldquo;{allowed.top_match.text}&rdquo;
+              {vote.affectedCount > 1
+                ? `Your vote applies to this and ${fmtInt(vote.affectedCount - 1)} other similar ${
+                    vote.affectedCount - 1 === 1 ? "post" : "posts"
+                  }, including: `
+                : "Voting on the closest match: "}
+              &ldquo;{allowed.top_match.text}&rdquo;
             </p>
             <div className="mt-3 flex gap-2">
               <button

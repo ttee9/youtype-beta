@@ -16,7 +16,7 @@ from typing import Union
 
 from app.embeddings import embed_text
 from app.moderation import is_low_quality, moderate
-from app.db import cast_vote, get_vote, init_db, insert_post, fetch_posts, find_similar_posts
+from app.db import cast_vote, get_vote, init_db, insert_post, fetch_posts, find_similar_posts, SIMILARITY_THRESHOLD
 
 load_dotenv()
 
@@ -98,6 +98,7 @@ class VoteResponse(BaseModel):
     status: Literal["active", "blocked"]
     user_vote: Literal[1, -1]
     already_voted: bool
+    affected_count: int = 1
 
 
 class PostsResponse(BaseModel):
@@ -170,7 +171,9 @@ def delete_post(post_id: str):
 @app.post("/posts/{post_id}/vote", response_model=VoteResponse)
 @limiter.limit("30/minute")
 def vote_post(request: Request, post_id: str, payload: VoteRequest = Body(...)):
-    """Cast an Allow/Block vote on a post; exactly one vote per IP per post.
+    """Cast an Allow/Block vote; exactly one vote per IP per post, but the
+    vote is applied to this post and every other active post similar enough
+    (see SIMILARITY_THRESHOLD) to count as the same statement.
 
     A post is blocked (hidden from feeds and similarity search) once it has
     at least BLOCK_MIN_VOTES total votes and at least BLOCK_VOTE_RATIO of
@@ -207,7 +210,7 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
         return {"status": "rejected", "reason": "Analysis service unavailable. Please try again later."}
 
     # 2) Find similar posts via pgvector cosine similarity
-    threshold = 0.78
+    threshold = SIMILARITY_THRESHOLD
     scored_posts = find_similar_posts(
         query_embedding=embedding,
         threshold=threshold,

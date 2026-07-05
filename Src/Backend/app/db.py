@@ -16,6 +16,11 @@ EMBEDDING_DIM = 1536  # text-embedding-3-small
 BLOCK_MIN_VOTES = 20
 BLOCK_VOTE_RATIO = 0.65
 
+# Posts at or above this cosine similarity are treated as saying "the same
+# thing" for both search matching and community moderation — an Allow/Block
+# vote on one of them is cast on all of them.
+SIMILARITY_THRESHOLD = 0.78
+
 engine = create_engine(os.getenv("DATABASE_URL"), future=True)
 
 
@@ -148,10 +153,11 @@ def fetch_posts(*, limit: int = 500) -> List[Dict[str, Any]]:
 
 
 def cast_vote(*, post_id: str, ip_hash: str, value: int) -> Optional[Dict[str, Any]]:
-    """Record a single Allow(1)/Block(-1) vote for a post from a given ip_hash.
+    """Record an Allow(1)/Block(-1) vote from a given ip_hash on a post and
+    every other active post similar enough to count as the same statement.
 
-    Each ip_hash may vote on a post exactly once; a repeat attempt does not
-    change the recorded vote and is reported back via `already_voted`.
+    Each ip_hash may vote on a given post exactly once; a repeat attempt does
+    not change the recorded vote and is reported back via `already_voted`.
     Returns None if the post doesn't exist.
     """
     with session_scope() as session:
@@ -159,45 +165,73 @@ def cast_vote(*, post_id: str, ip_hash: str, value: int) -> Optional[Dict[str, A
         if post is None:
             return None
 
+        affected_ids = [post_id]
+        if post.embedding is not None:
+            similar = (
+                session.query(Post.id)
+                .filter(Post.embedding.isnot(None))
+                .filter(Post.id != post_id)
+                .filter(Post.status == "active")
+                .filter((1 - Post.embedding.cosine_distance(post.embedding)) >= SIMILARITY_THRESHOLD)
+                .all()
+            )
+            affected_ids.extend(row.id for row in similar)
+
         existing = (
             session.query(Vote)
             .filter(Vote.post_id == post_id, Vote.ip_hash == ip_hash)
             .one_or_none()
         )
         already_voted = existing is not None
+
         if not already_voted:
-            session.add(Vote(post_id=post_id, ip_hash=ip_hash, value=value))
+            already_cast_on = {
+                row.post_id
+                for row in session.query(Vote.post_id).filter(
+                    Vote.post_id.in_(affected_ids), Vote.ip_hash == ip_hash
+                )
+            }
+            for pid in affected_ids:
+                if pid not in already_cast_on:
+                    session.add(Vote(post_id=pid, ip_hash=ip_hash, value=value))
             session.flush()
 
-        allow_votes = (
-            session.query(func.count())
-            .filter(Vote.post_id == post_id, Vote.value == 1)
-            .scalar()
-        )
-        block_votes = (
-            session.query(func.count())
-            .filter(Vote.post_id == post_id, Vote.value == -1)
-            .scalar()
-        )
-        total_votes = allow_votes + block_votes
+        result: Optional[Dict[str, Any]] = None
+        for pid in affected_ids:
+            p = session.get(Post, pid)
+            allow_votes = (
+                session.query(func.count())
+                .filter(Vote.post_id == pid, Vote.value == 1)
+                .scalar()
+            )
+            block_votes = (
+                session.query(func.count())
+                .filter(Vote.post_id == pid, Vote.value == -1)
+                .scalar()
+            )
+            total_votes = allow_votes + block_votes
 
-        post.upvotes = allow_votes
-        post.downvotes = block_votes
-        # Blocking is one-way: once a post is blocked it stays blocked, even
-        # if later Allow votes would bring the ratio back down.
-        if (
-            post.status == "active"
-            and total_votes >= BLOCK_MIN_VOTES
-            and block_votes / total_votes >= BLOCK_VOTE_RATIO
-        ):
-            post.status = "blocked"
+            p.upvotes = allow_votes
+            p.downvotes = block_votes
+            # Blocking is one-way: once a post is blocked it stays blocked, even
+            # if later Allow votes would bring the ratio back down.
+            if (
+                p.status == "active"
+                and total_votes >= BLOCK_MIN_VOTES
+                and block_votes / total_votes >= BLOCK_VOTE_RATIO
+            ):
+                p.status = "blocked"
+
+            if pid == post_id:
+                result = {
+                    "allow_votes": allow_votes,
+                    "block_votes": block_votes,
+                    "total_votes": total_votes,
+                    "status": p.status,
+                    "user_vote": existing.value if already_voted else value,
+                    "already_voted": already_voted,
+                    "affected_count": len(affected_ids),
+                }
 
         session.commit()
-        return {
-            "allow_votes": allow_votes,
-            "block_votes": block_votes,
-            "total_votes": total_votes,
-            "status": post.status,
-            "user_vote": existing.value if already_voted else value,
-            "already_voted": already_voted,
-        }
+        return result
