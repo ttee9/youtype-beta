@@ -16,7 +16,7 @@ from typing import Union
 
 from app.embeddings import embed_text
 from app.moderation import is_low_quality, moderate
-from app.db import cast_vote, init_db, insert_post, fetch_posts, find_similar_posts
+from app.db import cast_vote, find_own_post, get_vote, init_db, insert_post, fetch_posts, find_similar_posts
 
 load_dotenv()
 
@@ -106,11 +106,16 @@ class PostsResponse(BaseModel):
 
 
 class SubmittedPost(BaseModel):
-    """The post created by this /submit call."""
+    """The post backing this /submit call (may be a prior post from the same
+    visitor + text, reused instead of duplicated)."""
     id: str
     text: str
     created_at: str
     similarity: float = 1.0
+    allow_votes: int = 0
+    block_votes: int = 0
+    status: Literal["active", "blocked"] = "active"
+    user_vote: Optional[Literal[1, -1]] = None
 
 
 class AllowedResponse(BaseModel):
@@ -193,34 +198,54 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
     if not allowed:
         return {"status": "rejected", "reason": reason}
 
-    try:
-        embedding = await embed_text(payload.text)
-    except RuntimeError:
-        return {"status": "rejected", "reason": "Analysis service unavailable. Please try again later."}
+    stripped_text = payload.text.strip()
+    ip = get_remote_address(request)
+    ip_hash = hashlib.sha256(ip.encode()).hexdigest()
 
-    # 2) Save the post (submission is now real)
-    post_id = str(uuid4())
-    created_at = _now_utc().isoformat()
-    record = {
-        "id": post_id,
-        "text": payload.text.strip(),
-        "location": (payload.location or "").strip() or None,
-        "created_at": created_at,
-        "embedding": embedding,
-    }
+    # 2) Reuse this visitor's own prior post for identical text (avoids
+    # duplicate occurrences — and their vote tallies — piling up just from
+    # re-running Search on unchanged text), otherwise save a new post.
+    existing = find_own_post(ip_hash=ip_hash, text=stripped_text)
+    if existing is not None:
+        post_id = existing["id"]
+        created_at = existing["created_at"]
+        embedding = existing["embedding"]
+        submitted_vote_state = {
+            "allow_votes": existing["upvotes"],
+            "block_votes": existing["downvotes"],
+            "status": existing["status"],
+            "user_vote": get_vote(post_id=post_id, ip_hash=ip_hash),
+        }
+    else:
+        try:
+            embedding = await embed_text(payload.text)
+        except RuntimeError:
+            return {"status": "rejected", "reason": "Analysis service unavailable. Please try again later."}
 
-    # Persist to Postgres
-    try:
-        insert_post(post=record)
-    except Exception:
-        return {"status": "rejected", "reason": "Could not save your submission. Please try again."}
+        post_id = str(uuid4())
+        created_at = _now_utc().isoformat()
+        record = {
+            "id": post_id,
+            "text": stripped_text,
+            "location": (payload.location or "").strip() or None,
+            "created_at": created_at,
+            "embedding": embedding,
+            "submitter_ip_hash": ip_hash,
+        }
+
+        try:
+            insert_post(post=record)
+        except Exception:
+            return {"status": "rejected", "reason": "Could not save your submission. Please try again."}
+
+        submitted_vote_state = {"allow_votes": 0, "block_votes": 0, "status": "active", "user_vote": None}
 
     # 3) Find similar posts via pgvector cosine similarity
     threshold = 0.78
     scored_posts = find_similar_posts(
-        query_embedding=record["embedding"],
+        query_embedding=embedding,
         threshold=threshold,
-        exclude_id=record["id"],
+        exclude_id=post_id,
     )
 
     # 4) Adaptive trend — granularity depends on how far back similar posts go
@@ -299,10 +324,14 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
 
     return AllowedResponse(
         submitted_post=SubmittedPost(
-            id=record["id"],
-            text=record["text"],
-            created_at=record["created_at"],
+            id=post_id,
+            text=stripped_text,
+            created_at=created_at,
             similarity=1.0,
+            allow_votes=submitted_vote_state["allow_votes"],
+            block_votes=submitted_vote_state["block_votes"],
+            status=submitted_vote_state["status"],
+            user_vote=submitted_vote_state["user_vote"],
         ),
         similar_count=len(scored_posts) + 1,  # Include the submitted post itself in the count
         similarity_threshold=threshold,
