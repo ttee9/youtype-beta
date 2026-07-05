@@ -16,7 +16,7 @@ from typing import Union
 
 from app.embeddings import embed_text
 from app.moderation import is_low_quality, moderate
-from app.db import cast_vote, find_own_post, get_vote, init_db, insert_post, fetch_posts, find_similar_posts
+from app.db import cast_vote, get_vote, init_db, insert_post, fetch_posts, find_similar_posts
 
 load_dotenv()
 
@@ -105,13 +105,14 @@ class PostsResponse(BaseModel):
     posts: List[PostOut]
 
 
-class SubmittedPost(BaseModel):
-    """The post backing this /submit call (may be a prior post from the same
-    visitor + text, reused instead of duplicated)."""
+class TopMatch(BaseModel):
+    """The closest existing post to a /submit query, if any — this is what
+    the Allow/Block moderation widget votes on. Search itself never creates
+    a post; there's simply nothing to vote on when there's no match."""
     id: str
     text: str
     created_at: str
-    similarity: float = 1.0
+    similarity: float
     allow_votes: int = 0
     block_votes: int = 0
     status: Literal["active", "blocked"] = "active"
@@ -120,7 +121,7 @@ class SubmittedPost(BaseModel):
 
 class AllowedResponse(BaseModel):
     status: Literal["allowed"] = "allowed"
-    submitted_post: SubmittedPost
+    top_match: Optional[TopMatch] = None
     similar_count: int
     similarity_threshold: float
     trend: List[TrendPoint]
@@ -186,6 +187,8 @@ def vote_post(request: Request, post_id: str, payload: VoteRequest = Body(...)):
 @app.post("/submit", response_model=Union[AllowedResponse, RejectedResponse])
 @limiter.limit("6/minute")  # ~1 per 10 seconds; moving-window enforces spacing
 async def submit(request: Request, payload: SubmitRequest = Body(...)):
+    """Search for existing posts similar to payload.text. Read-only — this
+    never creates a post; use /post to actually add text to the corpus."""
     # 1) Moderation
     reason = is_low_quality(payload.text)
     if reason:
@@ -198,57 +201,20 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
     if not allowed:
         return {"status": "rejected", "reason": reason}
 
-    stripped_text = payload.text.strip()
-    ip = get_remote_address(request)
-    ip_hash = hashlib.sha256(ip.encode()).hexdigest()
+    try:
+        embedding = await embed_text(payload.text)
+    except RuntimeError:
+        return {"status": "rejected", "reason": "Analysis service unavailable. Please try again later."}
 
-    # 2) Reuse this visitor's own prior post for identical text (avoids
-    # duplicate occurrences — and their vote tallies — piling up just from
-    # re-running Search on unchanged text), otherwise save a new post.
-    existing = find_own_post(ip_hash=ip_hash, text=stripped_text)
-    if existing is not None:
-        post_id = existing["id"]
-        created_at = existing["created_at"]
-        embedding = existing["embedding"]
-        submitted_vote_state = {
-            "allow_votes": existing["upvotes"],
-            "block_votes": existing["downvotes"],
-            "status": existing["status"],
-            "user_vote": get_vote(post_id=post_id, ip_hash=ip_hash),
-        }
-    else:
-        try:
-            embedding = await embed_text(payload.text)
-        except RuntimeError:
-            return {"status": "rejected", "reason": "Analysis service unavailable. Please try again later."}
-
-        post_id = str(uuid4())
-        created_at = _now_utc().isoformat()
-        record = {
-            "id": post_id,
-            "text": stripped_text,
-            "location": (payload.location or "").strip() or None,
-            "created_at": created_at,
-            "embedding": embedding,
-            "submitter_ip_hash": ip_hash,
-        }
-
-        try:
-            insert_post(post=record)
-        except Exception:
-            return {"status": "rejected", "reason": "Could not save your submission. Please try again."}
-
-        submitted_vote_state = {"allow_votes": 0, "block_votes": 0, "status": "active", "user_vote": None}
-
-    # 3) Find similar posts via pgvector cosine similarity
+    # 2) Find similar posts via pgvector cosine similarity
     threshold = 0.78
     scored_posts = find_similar_posts(
         query_embedding=embedding,
         threshold=threshold,
-        exclude_id=post_id,
+        exclude_id="",
     )
 
-    # 4) Adaptive trend — granularity depends on how far back similar posts go
+    # 3) Adaptive trend — granularity depends on how far back similar posts go
     today = _now_utc().date()
 
     post_dates: List[date] = []
@@ -301,7 +267,7 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
 
     trend = [TrendPoint(date=d, count=buckets[d]) for d in sorted(buckets.keys())]
 
-    # 5) Common phrasing (MVP placeholder)
+    # 4) Common phrasing (MVP placeholder)
     common_phrases = [
         "rent is too high",
         "unaffordable housing",
@@ -309,7 +275,7 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
         "prices keep going up",
     ]
 
-    # 6) Examples (top 5)
+    # 5) Examples (top 5)
     examples = [
         Example(
             id=p["id"],
@@ -322,18 +288,26 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
         for p in scored_posts[:5]
     ]
 
+    # 6) The closest existing post (if any) is what Allow/Block votes attach to.
+    top_match: Optional[TopMatch] = None
+    if scored_posts:
+        best = scored_posts[0]
+        ip = get_remote_address(request)
+        ip_hash = hashlib.sha256(ip.encode()).hexdigest()
+        top_match = TopMatch(
+            id=best["id"],
+            text=best["text"],
+            created_at=best["created_at"],
+            similarity=round(best["similarity"], 2),
+            allow_votes=best.get("upvotes", 0),
+            block_votes=best.get("downvotes", 0),
+            status="active",
+            user_vote=get_vote(post_id=best["id"], ip_hash=ip_hash),
+        )
+
     return AllowedResponse(
-        submitted_post=SubmittedPost(
-            id=post_id,
-            text=stripped_text,
-            created_at=created_at,
-            similarity=1.0,
-            allow_votes=submitted_vote_state["allow_votes"],
-            block_votes=submitted_vote_state["block_votes"],
-            status=submitted_vote_state["status"],
-            user_vote=submitted_vote_state["user_vote"],
-        ),
-        similar_count=len(scored_posts) + 1,  # Include the submitted post itself in the count
+        top_match=top_match,
+        similar_count=len(scored_posts),
         similarity_threshold=threshold,
         trend=trend,
         trend_granularity=granularity,
@@ -345,7 +319,7 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
 @app.post("/post")
 @limiter.limit("12/minute")  # ~1 per 5 seconds; moving-window enforces spacing
 async def post_only(request: Request, payload: PostOnlyRequest = Body(...)):
-    """Persist text without embeddings/analysis (useful for simple posting)."""
+    """Persist text (with its embedding) into the searchable corpus."""
     reason = is_low_quality(payload.text)
     if reason:
         return {"status": "rejected", "reason": reason}
@@ -357,6 +331,11 @@ async def post_only(request: Request, payload: PostOnlyRequest = Body(...)):
     if not allowed:
         return {"status": "rejected", "reason": reason}
 
+    try:
+        embedding = await embed_text(payload.text)
+    except RuntimeError:
+        return {"status": "rejected", "reason": "Analysis service unavailable. Please try again later."}
+
     post_id = str(uuid4())
     created_at = _now_utc().isoformat()
     record = {
@@ -364,7 +343,7 @@ async def post_only(request: Request, payload: PostOnlyRequest = Body(...)):
         "text": payload.text.strip(),
         "location": (payload.location or "").strip() or None,
         "created_at": created_at,
-        "embedding": [],
+        "embedding": embedding,
     }
     try:
         insert_post(post=record)

@@ -34,7 +34,6 @@ class Post(Base):
     upvotes: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     downvotes: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     status: Mapped[str] = mapped_column(String, nullable=False, default="active", server_default="active")
-    submitter_ip_hash: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
 
 
 class Vote(Base):
@@ -59,8 +58,6 @@ def init_db() -> None:
         conn.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS upvotes INTEGER NOT NULL DEFAULT 0"))
         conn.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS downvotes INTEGER NOT NULL DEFAULT 0"))
         conn.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS status VARCHAR NOT NULL DEFAULT 'active'"))
-        conn.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS submitter_ip_hash VARCHAR"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_posts_submitter_ip_hash ON posts (submitter_ip_hash)"))
         conn.commit()
 
 
@@ -79,36 +76,9 @@ def insert_post(*, post: Dict[str, Any]) -> None:
                 location=post.get("location"),
                 created_at=post["created_at"],
                 embedding=post.get("embedding") or None,
-                submitter_ip_hash=post.get("submitter_ip_hash"),
             )
         )
         session.commit()
-
-
-def find_own_post(*, ip_hash: str, text: str) -> Optional[Dict[str, Any]]:
-    """Find a post this same visitor previously submitted with this exact text.
-
-    Used so re-running Search on unchanged text reuses the existing post
-    (and its vote tally) instead of creating a duplicate occurrence.
-    """
-    with session_scope() as session:
-        post = (
-            session.query(Post)
-            .filter(Post.submitter_ip_hash == ip_hash, Post.text == text)
-            .order_by(Post.created_at.desc())
-            .first()
-        )
-        if post is None:
-            return None
-        return {
-            "id": post.id,
-            "text": post.text,
-            "created_at": post.created_at,
-            "embedding": post.embedding,
-            "upvotes": post.upvotes,
-            "downvotes": post.downvotes,
-            "status": post.status,
-        }
 
 
 def get_vote(*, post_id: str, ip_hash: str) -> Optional[int]:

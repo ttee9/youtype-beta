@@ -7,19 +7,21 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 
 type TrendPoint = { date: string; count: number };
 
+type TopMatch = {
+  id: string;
+  text: string;
+  created_at: string;
+  similarity: number;
+  allow_votes: number;
+  block_votes: number;
+  status: "active" | "blocked";
+  user_vote: 1 | -1 | null;
+};
+
 type SubmitResponse =
   | {
       status: "allowed";
-      submitted_post: {
-        id: string;
-        text: string;
-        created_at: string;
-        similarity: number;
-        allow_votes?: number;
-        block_votes?: number;
-        status?: "active" | "blocked";
-        user_vote?: 1 | -1 | null;
-      };
+      top_match: TopMatch | null;
       similar_count: number;
       similarity_threshold: number;
       trend: TrendPoint[];
@@ -39,11 +41,15 @@ function mockResponse(): SubmitResponse {
 
   return {
     status: "allowed",
-    submitted_post: {
-      id: "mock",
-      text: "(mock) submitted text",
+    top_match: {
+      id: "mock-1",
+      text: "I can't afford my apartment anymore. Rent keeps climbing.",
       created_at: new Date().toISOString(),
-      similarity: 1.0,
+      similarity: 0.91,
+      allow_votes: 4,
+      block_votes: 0,
+      status: "active",
+      user_vote: null,
     },
     similar_count: 3421,
     similarity_threshold: 0.82,
@@ -235,8 +241,16 @@ export default function Page() {
 
     if (USE_MOCK) {
       await new Promise((res) => setTimeout(res, 200));
-      setResult(mockResponse());
-      setVote({ allowVotes: 0, blockVotes: 0, userVote: null, blocked: false });
+      const mock = mockResponse();
+      setResult(mock);
+      if (mock.status === "allowed" && mock.top_match) {
+        setVote({
+          allowVotes: mock.top_match.allow_votes,
+          blockVotes: mock.top_match.block_votes,
+          userVote: mock.top_match.user_vote,
+          blocked: mock.top_match.status === "blocked",
+        });
+      }
       setLoading("idle");
       return;
     }
@@ -255,13 +269,13 @@ export default function Page() {
 
       const data = await res.json();
       setResult(data);
-      if (data?.status === "allowed") {
-        const sp = data.submitted_post ?? {};
+      if (data?.status === "allowed" && data.top_match) {
+        const tm = data.top_match;
         setVote({
-          allowVotes: sp.allow_votes ?? 0,
-          blockVotes: sp.block_votes ?? 0,
-          userVote: sp.user_vote ?? null,
-          blocked: sp.status === "blocked",
+          allowVotes: tm.allow_votes ?? 0,
+          blockVotes: tm.block_votes ?? 0,
+          userVote: tm.user_vote ?? null,
+          blocked: tm.status === "blocked",
         });
       }
     } catch (err) {
@@ -314,22 +328,7 @@ export default function Page() {
   >(() => {
     if (!allowed) return [];
     const base = Array.isArray(allowed.examples) ? allowed.examples : [];
-    const submitted = allowed.submitted_post
-      ? [
-          {
-            id: allowed.submitted_post.id,
-            text: allowed.submitted_post.text,
-            similarity: allowed.submitted_post.similarity,
-            created_at: allowed.submitted_post.created_at,
-          },
-        ]
-      : [];
-
-    // Put the submitted post first so it reliably appears in both lists.
-    return [
-      ...submitted,
-      ...base.map((ex) => ({ id: ex.id, text: ex.text, similarity: ex.similarity, created_at: ex.created_at })),
-    ];
+    return base.map((ex) => ({ id: ex.id, text: ex.text, similarity: ex.similarity, created_at: ex.created_at }));
   }, [allowed]);
 
   const mostSimilarGroups = useMemo(() => {
@@ -468,7 +467,7 @@ export default function Page() {
         )}
 
         {/* Community moderation vote */}
-        {allowed && vote && (
+        {allowed && allowed.top_match && vote && (
           <div className="mt-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
             <div className="flex items-center justify-between gap-3">
               <div className="text-xs font-semibold uppercase tracking-widest text-gray-400">
@@ -478,10 +477,13 @@ export default function Page() {
                 {fmtInt(vote.allowVotes + vote.blockVotes)} votes
               </div>
             </div>
+            <p className="mt-1 text-xs text-gray-400">
+              Voting on the closest match: &ldquo;{allowed.top_match.text}&rdquo;
+            </p>
             <div className="mt-3 flex gap-2">
               <button
                 type="button"
-                onClick={() => handleVote(allowed.submitted_post.id, 1)}
+                onClick={() => handleVote(allowed.top_match!.id, 1)}
                 disabled={Boolean(vote.userVote) || voting}
                 className={`flex-1 rounded-xl border px-4 py-2 text-sm font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
                   vote.userVote === 1
@@ -493,7 +495,7 @@ export default function Page() {
               </button>
               <button
                 type="button"
-                onClick={() => handleVote(allowed.submitted_post.id, -1)}
+                onClick={() => handleVote(allowed.top_match!.id, -1)}
                 disabled={Boolean(vote.userVote) || voting}
                 className={`flex-1 rounded-xl border px-4 py-2 text-sm font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
                   vote.userVote === -1
@@ -526,9 +528,6 @@ export default function Page() {
             </div>
             <div className="mt-1.5 text-7xl font-black tabular-nums tracking-tight leading-none">
               {fmtInt(bigCount)}
-            </div>
-            <div className="mt-3">
-              <span className="text-xs text-purple-200">Your post</span>
             </div>
           </div>
         )}
