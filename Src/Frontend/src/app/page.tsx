@@ -10,7 +10,16 @@ type TrendPoint = { date: string; count: number };
 type SubmitResponse =
   | {
       status: "allowed";
-      submitted_post: { id: string; text: string; created_at: string; similarity: number };
+      submitted_post: {
+        id: string;
+        text: string;
+        created_at: string;
+        similarity: number;
+        allow_votes?: number;
+        block_votes?: number;
+        status?: "active" | "blocked";
+        user_vote?: 1 | -1 | null;
+      };
       similar_count: number;
       similarity_threshold: number;
       trend: TrendPoint[];
@@ -247,7 +256,13 @@ export default function Page() {
       const data = await res.json();
       setResult(data);
       if (data?.status === "allowed") {
-        setVote({ allowVotes: 0, blockVotes: 0, userVote: null, blocked: false });
+        const sp = data.submitted_post ?? {};
+        setVote({
+          allowVotes: sp.allow_votes ?? 0,
+          blockVotes: sp.block_votes ?? 0,
+          userVote: sp.user_vote ?? null,
+          blocked: sp.status === "blocked",
+        });
       }
     } catch (err) {
       console.error(err);
