@@ -132,6 +132,13 @@ function useCountUp(target: number, opts?: { durationMs?: number }) {
   return value;
 }
 
+type VoteState = {
+  allowVotes: number;
+  blockVotes: number;
+  userVote: 1 | -1 | null;
+  blocked: boolean;
+};
+
 export default function Page() {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState<"idle" | "posting" | "analyzing">("idle");
@@ -139,6 +146,9 @@ export default function Page() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastPosted, setLastPosted] = useState<{ id: string; text: string } | null>(null);
+  const [vote, setVote] = useState<VoteState | null>(null);
+  const [voting, setVoting] = useState(false);
+  const [voteError, setVoteError] = useState<string | null>(null);
 
   const canPost = useMemo(() => text.trim().length >= 5 && loading === "idle", [text, loading]);
   const canSearch = useMemo(() => text.trim().length >= 10 && loading === "idle", [text, loading]);
@@ -159,6 +169,8 @@ export default function Page() {
     setError(null);
     setResult(null);
     setLastPosted(null);
+    setVote(null);
+    setVoteError(null);
     setLoading("posting");
 
     if (USE_MOCK) {
@@ -209,10 +221,13 @@ export default function Page() {
     setLoading("analyzing");
     setResult(null);
     setLastPosted(null);
+    setVote(null);
+    setVoteError(null);
 
     if (USE_MOCK) {
       await new Promise((res) => setTimeout(res, 200));
       setResult(mockResponse());
+      setVote({ allowVotes: 0, blockVotes: 0, userVote: null, blocked: false });
       setLoading("idle");
       return;
     }
@@ -231,6 +246,9 @@ export default function Page() {
 
       const data = await res.json();
       setResult(data);
+      if (data?.status === "allowed") {
+        setVote({ allowVotes: 0, blockVotes: 0, userVote: null, blocked: false });
+      }
     } catch (err) {
       console.error(err);
       setError("Couldn't reach the server. Please check your connection and try again.");
@@ -239,8 +257,40 @@ export default function Page() {
     }
   }
 
+  async function handleVote(postId: string, value: 1 | -1) {
+    if (!postId || vote?.userVote || voting) return;
+
+    setVoting(true);
+    setVoteError(null);
+
+    try {
+      const res = await fetch(`${API_BASE}/posts/${postId}/vote`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setVoteError("Couldn't record your vote. Please try again.");
+        return;
+      }
+      setVote({
+        allowVotes: data.allow_votes,
+        blockVotes: data.block_votes,
+        userVote: data.user_vote,
+        blocked: data.status === "blocked",
+      });
+    } catch (err) {
+      console.error(err);
+      setVoteError("Couldn't reach the server to record your vote.");
+    } finally {
+      setVoting(false);
+    }
+  }
+
   const allowed = result && result.status === "allowed" ? result : null;
   const rejected = result && result.status === "rejected" ? result : null;
+  const showAnalysis = Boolean(allowed) && !(vote?.blocked ?? false);
 
   const bigCount = useCountUp(allowed?.similar_count ?? 0, { durationMs: 1100 });
 
@@ -402,8 +452,59 @@ export default function Page() {
           </div>
         )}
 
+        {/* Community moderation vote */}
+        {allowed && vote && (
+          <div className="mt-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs font-semibold uppercase tracking-widest text-gray-400">
+                Community Moderation
+              </div>
+              <div className="text-xs text-gray-400 tabular-nums">
+                {fmtInt(vote.allowVotes + vote.blockVotes)} votes
+              </div>
+            </div>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={() => handleVote(allowed.submitted_post.id, 1)}
+                disabled={Boolean(vote.userVote) || voting}
+                className={`flex-1 rounded-xl border px-4 py-2 text-sm font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                  vote.userVote === 1
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                }`}
+              >
+                Allow · {fmtInt(vote.allowVotes)}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleVote(allowed.submitted_post.id, -1)}
+                disabled={Boolean(vote.userVote) || voting}
+                className={`flex-1 rounded-xl border px-4 py-2 text-sm font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                  vote.userVote === -1
+                    ? "border-rose-200 bg-rose-50 text-rose-700"
+                    : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                }`}
+              >
+                Block · {fmtInt(vote.blockVotes)}
+              </button>
+            </div>
+            {vote.userVote && (
+              <p className="mt-2 text-xs text-gray-400">
+                You voted {vote.userVote === 1 ? "Allow" : "Block"}.
+              </p>
+            )}
+            {voteError && <p className="mt-2 text-xs text-rose-600">{voteError}</p>}
+            {vote.blocked && (
+              <div className="mt-3 rounded-lg border border-rose-100 bg-rose-50 px-4 py-2.5 text-sm text-rose-800">
+                Analysis has been blocked by user votes.
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Count hero */}
-        {allowed && (
+        {showAnalysis && (
           <div className="mt-4 rounded-2xl bg-purple-700 px-8 py-7 text-white">
             <div className="text-xs font-semibold uppercase tracking-widest text-purple-200">
               Number of Similar Texts
@@ -428,7 +529,7 @@ export default function Page() {
         )}
 
         {/* Timeline */}
-        {allowed && allowed.trend?.length ? (
+        {showAnalysis && allowed && allowed.trend?.length ? (
           <div className="mt-4 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
             {(() => {
               const granularity = allowed.trend_granularity;
@@ -545,7 +646,7 @@ export default function Page() {
         ) : null}
 
         {/* Most Similar */}
-        {allowed && (
+        {showAnalysis && (
           <div className="mt-6">
             <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-gray-400">
               Most Similar
@@ -576,7 +677,7 @@ export default function Page() {
         )}
 
         {/* Recent Similar */}
-        {mostRecentExamples.length ? (
+        {showAnalysis && mostRecentExamples.length ? (
           <div className="mt-6">
             <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-gray-400">
               Recent Similar
