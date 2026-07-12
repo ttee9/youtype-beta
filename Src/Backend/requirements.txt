@@ -7,3 +7,4 @@ sqlalchemy==2.0.36
 slowapi==0.1.9
 psycopg2-binary==2.9.10
 pgvector==0.3.6
+numpy
