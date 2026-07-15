@@ -20,9 +20,25 @@ from app.db import cast_vote, get_vote, init_db, insert_post, fetch_posts, find_
 
 load_dotenv()
 
+
+def get_client_ip(request: Request) -> str:
+    """Real client IP, not the reverse proxy's.
+
+    Railway/Render (and similar PaaS) terminate the connection at their own
+    edge and forward to this app, so request.client.host is the proxy's
+    address rather than the visitor's — and can vary per-request, making
+    every hit look like a new visitor. Their edge sets X-Forwarded-For to
+    the actual client IP, so prefer that when present.
+    """
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return get_remote_address(request)
+
+
 # Rate limiting setup — moving-window prevents burst (all 10 tokens at once).
 # Note: memory:// storage is per-process; use Redis for multi-worker deployments.
-limiter = Limiter(key_func=get_remote_address, strategy="moving-window")
+limiter = Limiter(key_func=get_client_ip, strategy="moving-window")
 
 app = FastAPI(title="YouType API")
 app.state.limiter = limiter
@@ -180,7 +196,7 @@ def vote_post(request: Request, post_id: str, payload: VoteRequest = Body(...)):
     them are Block votes. This is the community-moderation mechanism
     replacing fixed content rules.
     """
-    ip = get_remote_address(request)
+    ip = get_client_ip(request)
     ip_hash = hashlib.sha256(ip.encode()).hexdigest()
     result = cast_vote(post_id=post_id, ip_hash=ip_hash, value=payload.value)
     if result is None:
@@ -295,7 +311,7 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
     top_match: Optional[TopMatch] = None
     if scored_posts:
         best = scored_posts[0]
-        ip = get_remote_address(request)
+        ip = get_client_ip(request)
         ip_hash = hashlib.sha256(ip.encode()).hexdigest()
         top_match = TopMatch(
             id=best["id"],
