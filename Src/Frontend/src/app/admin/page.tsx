@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ADMIN_TOKEN_STORAGE_KEY, DEV_MODE_STORAGE_KEY } from "@/lib/devMode";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
-const TOKEN_STORAGE_KEY = "youtype_admin_token";
 
 type AdminPost = {
   id: string;
@@ -17,6 +17,7 @@ type AdminPost = {
 
 export default function AdminPage() {
   const [token, setToken] = useState("");
+  const [devModeOnMainSite, setDevModeOnMainSite] = useState(false);
   const [query, setQuery] = useState("");
   const [posts, setPosts] = useState<AdminPost[]>([]);
   const [loading, setLoading] = useState(false);
@@ -24,13 +25,23 @@ export default function AdminPage() {
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
   useEffect(() => {
-    const saved = window.localStorage.getItem(TOKEN_STORAGE_KEY);
+    const saved = window.localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY);
     if (saved) setToken(saved);
+    setDevModeOnMainSite(window.localStorage.getItem(DEV_MODE_STORAGE_KEY) === "1");
   }, []);
 
   function saveToken(next: string) {
     setToken(next);
-    window.localStorage.setItem(TOKEN_STORAGE_KEY, next);
+    window.localStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, next);
+  }
+
+  function setDevMode(enabled: boolean) {
+    setDevModeOnMainSite(enabled);
+    if (enabled) {
+      window.localStorage.setItem(DEV_MODE_STORAGE_KEY, "1");
+    } else {
+      window.localStorage.removeItem(DEV_MODE_STORAGE_KEY);
+    }
   }
 
   async function search() {
@@ -116,6 +127,16 @@ export default function AdminPage() {
             placeholder="X-Admin-Token"
             className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
           />
+
+          <label className="mt-4 flex items-center gap-2 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              checked={devModeOnMainSite}
+              onChange={(e) => setDevMode(e.target.checked)}
+              className="h-4 w-4 rounded border-gray-300"
+            />
+            Enable dev mode on the main site (adds Force Allow / Force Block on this browser)
+          </label>
 
           <label className="mt-4 block text-xs font-semibold uppercase tracking-widest text-gray-400">
             Search text
