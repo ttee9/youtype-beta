@@ -152,6 +152,52 @@ def fetch_posts(*, limit: int = 500) -> List[Dict[str, Any]]:
         ]
 
 
+def fetch_posts_admin(*, query: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
+    """Return posts regardless of status, optionally filtered by a text
+    substring. Admin/dev tooling only — unlike fetch_posts, this doesn't
+    filter to status == "active"."""
+    with session_scope() as session:
+        q = session.query(Post)
+        if query:
+            q = q.filter(Post.text.ilike(f"%{query}%"))
+        rows = q.order_by(Post.created_at.desc()).limit(limit).all()
+        return [
+            {
+                "id": r.id,
+                "text": r.text,
+                "location": r.location,
+                "created_at": r.created_at,
+                "upvotes": r.upvotes,
+                "downvotes": r.downvotes,
+                "status": r.status,
+            }
+            for r in rows
+        ]
+
+
+def set_post_status(*, post_id: str, status: str) -> Optional[Dict[str, Any]]:
+    """Directly override a post's status. Admin/dev tooling only — bypasses
+    the vote-threshold logic in cast_vote(), so it doesn't touch vote
+    tallies and can be re-flipped by a later vote if the threshold is
+    already met.
+    """
+    with session_scope() as session:
+        post = session.get(Post, post_id)
+        if post is None:
+            return None
+        post.status = status
+        session.commit()
+        return {
+            "id": post.id,
+            "text": post.text,
+            "location": post.location,
+            "created_at": post.created_at,
+            "upvotes": post.upvotes,
+            "downvotes": post.downvotes,
+            "status": post.status,
+        }
+
+
 def cast_vote(*, post_id: str, ip_hash: str, value: int) -> Optional[Dict[str, Any]]:
     """Record an Allow(1)/Block(-1) vote from a given ip_hash on a post and
     every other active post similar enough to count as the same statement.

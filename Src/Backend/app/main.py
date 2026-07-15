@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
@@ -16,7 +17,17 @@ from typing import Union
 
 from app.embeddings import embed_text
 from app.moderation import is_low_quality, moderate
-from app.db import cast_vote, get_vote, init_db, insert_post, fetch_posts, find_similar_posts, SIMILARITY_THRESHOLD
+from app.db import (
+    cast_vote,
+    get_vote,
+    init_db,
+    insert_post,
+    fetch_posts,
+    find_similar_posts,
+    fetch_posts_admin,
+    set_post_status,
+    SIMILARITY_THRESHOLD,
+)
 
 load_dotenv()
 
@@ -34,6 +45,19 @@ def get_client_ip(request: Request) -> str:
     if forwarded:
         return forwarded.split(",")[0].strip()
     return get_remote_address(request)
+
+
+def require_admin(request: Request) -> None:
+    """Gate /admin/* routes behind a shared-secret header.
+
+    ADMIN_TOKEN must be set in the environment; unset means the routes are
+    unreachable (fail closed) rather than open. Comparison is constant-time
+    to avoid leaking the token via response-timing.
+    """
+    token = os.getenv("ADMIN_TOKEN")
+    supplied = request.headers.get("x-admin-token", "")
+    if not token or not hmac.compare_digest(supplied, token):
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 # Rate limiting setup — moving-window prevents burst (all 10 tokens at once).
@@ -115,6 +139,25 @@ class VoteResponse(BaseModel):
     user_vote: Literal[1, -1]
     already_voted: bool
     affected_count: int = 1
+
+
+class AdminPostOut(BaseModel):
+    id: str
+    text: str
+    location: Optional[str] = None
+    created_at: str
+    upvotes: int = 0
+    downvotes: int = 0
+    status: Literal["active", "blocked"]
+
+
+class AdminPostsResponse(BaseModel):
+    count: int
+    posts: List[AdminPostOut]
+
+
+class AdminStatusRequest(BaseModel):
+    status: Literal["active", "blocked"]
 
 
 class PostsResponse(BaseModel):
@@ -202,6 +245,32 @@ def vote_post(request: Request, post_id: str, payload: VoteRequest = Body(...)):
     if result is None:
         raise HTTPException(status_code=404, detail="Post not found")
     return result
+
+
+@app.get("/admin/posts", response_model=AdminPostsResponse)
+@limiter.limit("20/minute")
+def admin_list_posts(request: Request, q: Optional[str] = None, limit: int = 50):
+    """List posts regardless of status, optionally filtered by a text
+    substring — dev tooling for finding a post to toggle, since the public
+    /posts endpoint hides blocked posts."""
+    require_admin(request)
+    posts = fetch_posts_admin(query=q, limit=min(max(limit, 1), 200))
+    return {"count": len(posts), "posts": posts}
+
+
+@app.patch("/admin/posts/{post_id}/status", response_model=AdminPostOut)
+@limiter.limit("30/minute")
+def admin_set_post_status(request: Request, post_id: str, payload: AdminStatusRequest = Body(...)):
+    """Directly set a post's active/blocked status, bypassing the vote
+    threshold — dev tooling to test moderation states without collecting
+    real votes. Note this is a manual override: if the post's existing vote
+    ratio already meets the block threshold, a subsequent vote on it (or a
+    cascaded vote from a similar post) can flip it back to blocked."""
+    require_admin(request)
+    post = set_post_status(post_id=post_id, status=payload.status)
+    if post is None:
+        raise HTTPException(status_code=404, detail="Post not found")
+    return post
 
 @app.post("/submit", response_model=Union[AllowedResponse, RejectedResponse])
 @limiter.limit("6/minute")  # ~1 per 10 seconds; moving-window enforces spacing
