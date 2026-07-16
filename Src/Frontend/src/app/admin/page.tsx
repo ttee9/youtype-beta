@@ -1,196 +1,99 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ADMIN_TOKEN_STORAGE_KEY } from "@/lib/devMode";
+import YouTypeApp from "@/components/YouTypeApp";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
-
-type AdminPost = {
-  id: string;
-  text: string;
-  location: string | null;
-  created_at: string;
-  upvotes: number;
-  downvotes: number;
-  status: "active" | "blocked";
-};
+const ADMIN_TOKEN_STORAGE_KEY = "youtype_admin_token";
 
 export default function AdminPage() {
-  const [token, setToken] = useState("");
-  const [query, setQuery] = useState("");
-  const [posts, setPosts] = useState<AdminPost[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [checkedStorage, setCheckedStorage] = useState(false);
+  const [inputValue, setInputValue] = useState("");
+  const [validating, setValidating] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
 
   useEffect(() => {
-    const saved = window.localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY);
-    if (saved) setToken(saved);
+    setToken(window.localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY));
+    setCheckedStorage(true);
   }, []);
 
-  function saveToken(next: string) {
-    setToken(next);
-    if (next) {
-      window.localStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, next);
-    } else {
-      window.localStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
-    }
-  }
-
-  async function search() {
-    if (!token) {
-      setError("Enter the admin token first.");
+  async function submitToken() {
+    if (!inputValue) {
+      setModalError("Enter the admin token.");
       return;
     }
-    setLoading(true);
-    setError(null);
+    setValidating(true);
+    setModalError(null);
     try {
-      const params = new URLSearchParams();
-      if (query.trim()) params.set("q", query.trim());
-      params.set("limit", "50");
-      const res = await fetch(`${API_BASE}/admin/posts?${params.toString()}`, {
-        headers: { "X-Admin-Token": token },
+      const res = await fetch(`${API_BASE}/admin/posts?limit=1`, {
+        headers: { "X-Admin-Token": inputValue },
       });
       if (res.status === 401) {
-        setError("Unauthorized — check the admin token.");
-        setPosts([]);
+        setModalError("Invalid token.");
         return;
       }
       if (!res.ok) {
-        setError(`Request failed (${res.status}).`);
+        setModalError(`Request failed (${res.status}).`);
         return;
       }
-      const data = await res.json();
-      setPosts(data.posts ?? []);
+      window.localStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, inputValue);
+      setToken(inputValue);
+      setInputValue("");
     } catch (err) {
       console.error(err);
-      setError("Couldn't reach the server.");
+      setModalError("Couldn't reach the server.");
     } finally {
-      setLoading(false);
+      setValidating(false);
     }
   }
 
-  async function toggleStatus(post: AdminPost) {
-    const nextStatus = post.status === "active" ? "blocked" : "active";
-    setTogglingId(post.id);
-    setError(null);
-    try {
-      const res = await fetch(`${API_BASE}/admin/posts/${post.id}/status`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Admin-Token": token,
-        },
-        body: JSON.stringify({ status: nextStatus }),
-      });
-      if (res.status === 401) {
-        setError("Unauthorized — check the admin token.");
-        return;
-      }
-      if (!res.ok) {
-        setError(`Request failed (${res.status}).`);
-        return;
-      }
-      const updated: AdminPost = await res.json();
-      setPosts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
-    } catch (err) {
-      console.error(err);
-      setError("Couldn't reach the server.");
-    } finally {
-      setTogglingId(null);
-    }
+  function logOut() {
+    window.localStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+    setToken(null);
+  }
+
+  if (!checkedStorage) return null;
+
+  if (!token) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 px-4">
+        <div className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-6 shadow-lg">
+          <h1 className="text-lg font-bold text-gray-900">Admin token required</h1>
+          <p className="mt-1 text-sm text-gray-500">Enter the admin token to access dev mode.</p>
+          <input
+            type="password"
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && submitToken()}
+            placeholder="X-Admin-Token"
+            autoFocus
+            className="mt-4 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+          />
+          {modalError && <p className="mt-2 text-xs text-rose-600">{modalError}</p>}
+          <button
+            type="button"
+            onClick={submitToken}
+            disabled={validating}
+            className="mt-4 w-full rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:opacity-60"
+          >
+            {validating ? "Checking…" : "Enter"}
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <main className="min-h-screen bg-gray-50 px-4 py-10 text-gray-900">
-      <div className="mx-auto max-w-3xl">
-        <h1 className="text-xl font-bold tracking-tight">Dev mode — post status</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Search posts and toggle Active/Blocked directly, bypassing community voting.
-        </p>
-
-        <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-          <label className="block text-xs font-semibold uppercase tracking-widest text-gray-400">
-            Admin token
-          </label>
-          <input
-            type="password"
-            value={token}
-            onChange={(e) => saveToken(e.target.value)}
-            placeholder="X-Admin-Token"
-            className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
-          />
-          <p className="mt-1.5 text-xs text-gray-400">
-            Saving a token here also turns on Force Allow/Block for this browser on the main
-            page. Clear the field to turn it off.
-          </p>
-
-          <label className="mt-4 block text-xs font-semibold uppercase tracking-widest text-gray-400">
-            Search text
-          </label>
-          <div className="mt-2 flex gap-2">
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && search()}
-              placeholder="e.g. dogs are the worst"
-              className="flex-1 rounded-xl border border-gray-200 px-3 py-2 text-sm"
-            />
-            <button
-              type="button"
-              onClick={search}
-              disabled={loading}
-              className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition disabled:opacity-60"
-            >
-              {loading ? "Searching…" : "Search"}
-            </button>
-          </div>
-
-          {error && <p className="mt-3 text-xs text-rose-600">{error}</p>}
-        </div>
-
-        <div className="mt-4 space-y-3">
-          {posts.map((post) => (
-            <div
-              key={post.id}
-              className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <p className="text-sm text-gray-800">&ldquo;{post.text}&rdquo;</p>
-                <span
-                  className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${
-                    post.status === "blocked"
-                      ? "bg-rose-50 text-rose-700"
-                      : "bg-emerald-50 text-emerald-700"
-                  }`}
-                >
-                  {post.status}
-                </span>
-              </div>
-              <p className="mt-1 text-xs text-gray-400">
-                Allow · {post.upvotes} &nbsp;·&nbsp; Block · {post.downvotes} &nbsp;·&nbsp;{" "}
-                {post.id}
-              </p>
-              <button
-                type="button"
-                onClick={() => toggleStatus(post)}
-                disabled={togglingId === post.id}
-                className="mt-3 rounded-xl border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:opacity-60"
-              >
-                {togglingId === post.id
-                  ? "Updating…"
-                  : post.status === "active"
-                  ? "Block"
-                  : "Unblock"}
-              </button>
-            </div>
-          ))}
-          {!loading && posts.length === 0 && (
-            <p className="text-center text-sm text-gray-400">No posts loaded yet.</p>
-          )}
-        </div>
-      </div>
-    </main>
+    <div className="relative">
+      <button
+        type="button"
+        onClick={logOut}
+        className="fixed right-4 top-4 z-40 rounded-full border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-500 shadow-sm transition hover:bg-gray-50"
+      >
+        Log out (dev)
+      </button>
+      <YouTypeApp devMode adminToken={token} />
+    </div>
   );
 }
