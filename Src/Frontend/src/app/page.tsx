@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ADMIN_TOKEN_STORAGE_KEY } from "@/lib/devMode";
 
 const USE_MOCK = false;
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
@@ -166,12 +165,6 @@ export default function Page() {
   const [vote, setVote] = useState<VoteState | null>(null);
   const [voting, setVoting] = useState(false);
   const [voteError, setVoteError] = useState<string | null>(null);
-  const [adminToken, setAdminToken] = useState("");
-  const [forcing, setForcing] = useState(false);
-
-  useEffect(() => {
-    setAdminToken(window.localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) ?? "");
-  }, []);
 
   const canPost = useMemo(() => text.trim().length >= 5 && loading === "idle", [text, loading]);
   const canSearch = useMemo(() => text.trim().length >= 10 && loading === "idle", [text, loading]);
@@ -325,48 +318,6 @@ export default function Page() {
       setVoteError("Couldn't reach the server to record your vote.");
     } finally {
       setVoting(false);
-    }
-  }
-
-  async function handleForceStatus(postId: string, status: "active" | "blocked") {
-    if (!postId || !adminToken || forcing) return;
-
-    setForcing(true);
-    setVoteError(null);
-
-    try {
-      const res = await fetch(`${API_BASE}/admin/posts/${postId}/status`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Admin-Token": adminToken,
-        },
-        body: JSON.stringify({ status }),
-      });
-      if (res.status === 401) {
-        setVoteError("Dev mode: unauthorized — check the admin token in /admin.");
-        return;
-      }
-      if (!res.ok) {
-        setVoteError("Dev mode: couldn't update status. Please try again.");
-        return;
-      }
-      const data = await res.json();
-      setVote((prev) =>
-        prev
-          ? {
-              ...prev,
-              allowVotes: data.upvotes,
-              blockVotes: data.downvotes,
-              blocked: data.status === "blocked",
-            }
-          : prev
-      );
-    } catch (err) {
-      console.error(err);
-      setVoteError("Dev mode: couldn't reach the server.");
-    } finally {
-      setForcing(false);
     }
   }
 
@@ -559,26 +510,6 @@ export default function Page() {
                 Block
               </button>
             </div>
-            {adminToken && (
-              <div className="mt-2 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleForceStatus(allowed.top_match!.id, "active")}
-                  disabled={forcing}
-                  className="flex-1 rounded-xl border border-amber-200 bg-amber-50 px-4 py-1.5 text-xs font-semibold text-amber-800 shadow-sm transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  Force Allow (dev)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleForceStatus(allowed.top_match!.id, "blocked")}
-                  disabled={forcing}
-                  className="flex-1 rounded-xl border border-amber-200 bg-amber-50 px-4 py-1.5 text-xs font-semibold text-amber-800 shadow-sm transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  Force Block (dev)
-                </button>
-              </div>
-            )}
             {vote.userVote && (
               <p className="mt-2 text-xs text-gray-400">
                 You voted {vote.userVote === 1 ? "Allow" : "Block"}.

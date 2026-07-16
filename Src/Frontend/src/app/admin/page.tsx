@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ADMIN_TOKEN_STORAGE_KEY } from "@/lib/devMode";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+const ADMIN_TOKEN_STORAGE_KEY = "youtype_admin_token";
 
 type AdminPost = {
   id: string;
@@ -120,11 +120,6 @@ export default function AdminPage() {
             placeholder="X-Admin-Token"
             className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
           />
-          <p className="mt-1.5 text-xs text-gray-400">
-            Saving a token here also turns on Force Allow/Block for this browser on the main
-            page. Clear the field to turn it off.
-          </p>
-
           <label className="mt-4 block text-xs font-semibold uppercase tracking-widest text-gray-400">
             Search text
           </label>
