@@ -524,13 +524,8 @@ export default function Page() {
         {/* Community moderation vote */}
         {allowed && allowed.top_match && vote && (
           <div className="mt-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-xs font-semibold uppercase tracking-widest text-gray-400">
-                Community Moderation
-              </div>
-              <div className="text-xs text-gray-400 tabular-nums">
-                {fmtInt(vote.allowVotes + vote.blockVotes)} votes
-              </div>
+            <div className="text-xs font-semibold uppercase tracking-widest text-gray-400">
+              Community Moderation
             </div>
             <p className="mt-1 text-xs text-gray-400">
               {vote.affectedCount > 1
@@ -551,7 +546,7 @@ export default function Page() {
                     : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
                 }`}
               >
-                Allow · {fmtInt(vote.allowVotes)}
+                Allow
               </button>
               <button
                 type="button"
@@ -563,7 +558,7 @@ export default function Page() {
                     : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
                 }`}
               >
-                Block · {fmtInt(vote.blockVotes)}
+                Block
               </button>
             </div>
             {devMode && adminToken && (
