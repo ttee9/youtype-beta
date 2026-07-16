@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ADMIN_TOKEN_STORAGE_KEY, DEV_MODE_STORAGE_KEY } from "@/lib/devMode";
+import { ADMIN_TOKEN_STORAGE_KEY } from "@/lib/devMode";
 
 const USE_MOCK = false;
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
@@ -166,12 +166,10 @@ export default function Page() {
   const [vote, setVote] = useState<VoteState | null>(null);
   const [voting, setVoting] = useState(false);
   const [voteError, setVoteError] = useState<string | null>(null);
-  const [devMode, setDevMode] = useState(false);
   const [adminToken, setAdminToken] = useState("");
   const [forcing, setForcing] = useState(false);
 
   useEffect(() => {
-    setDevMode(window.localStorage.getItem(DEV_MODE_STORAGE_KEY) === "1");
     setAdminToken(window.localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) ?? "");
   }, []);
 
@@ -561,7 +559,7 @@ export default function Page() {
                 Block
               </button>
             </div>
-            {devMode && adminToken && (
+            {adminToken && (
               <div className="mt-2 flex gap-2">
                 <button
                   type="button"
