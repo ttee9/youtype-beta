@@ -172,6 +172,7 @@ export default function YouTypeApp({ devMode = false, adminToken }: YouTypeAppPr
   const [voting, setVoting] = useState(false);
   const [voteError, setVoteError] = useState<string | null>(null);
   const [forcing, setForcing] = useState(false);
+  const [showModerationInfo, setShowModerationInfo] = useState(false);
 
   const canPost = useMemo(() => text.trim().length >= 5 && loading === "idle", [text, loading]);
   const canSearch = useMemo(() => text.trim().length >= 10 && loading === "idle", [text, loading]);
@@ -297,7 +298,7 @@ export default function YouTypeApp({ devMode = false, adminToken }: YouTypeAppPr
   }
 
   async function handleVote(postId: string, value: 1 | -1) {
-    if (!postId || vote?.userVote || voting) return;
+    if (!postId || vote?.userVote === value || voting) return;
 
     setVoting(true);
     setVoteError(null);
@@ -522,9 +523,26 @@ export default function YouTypeApp({ devMode = false, adminToken }: YouTypeAppPr
         {/* Community moderation vote */}
         {allowed && allowed.top_match && vote && (
           <div className="mt-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-            <div className="text-xs font-semibold uppercase tracking-widest text-gray-400">
-              Community Moderation
+            <div className="flex items-center gap-1.5">
+              <div className="text-xs font-semibold uppercase tracking-widest text-gray-400">
+                Community Moderation
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowModerationInfo((s) => !s)}
+                aria-expanded={showModerationInfo}
+                aria-label="What does Blocked mean?"
+                className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-gray-300 text-[10px] font-bold leading-none text-gray-400 transition hover:border-gray-400 hover:text-gray-600"
+              >
+                i
+              </button>
             </div>
+            {showModerationInfo && (
+              <p className="mt-2 rounded-lg bg-gray-50 px-3 py-2 text-xs leading-relaxed text-gray-500">
+                Once a post gets enough votes and a high enough share of them are Block, it's
+                hidden from search — permanently, even if later votes lean back toward Allow.
+              </p>
+            )}
             <p className="mt-1 text-xs text-gray-400">
               {vote.affectedCount > 1
                 ? `Your vote applies to this and ${fmtInt(vote.affectedCount - 1)} other similar ${
@@ -537,7 +555,7 @@ export default function YouTypeApp({ devMode = false, adminToken }: YouTypeAppPr
               <button
                 type="button"
                 onClick={() => handleVote(allowed.top_match!.id, 1)}
-                disabled={Boolean(vote.userVote) || voting}
+                disabled={voting}
                 className={`flex-1 rounded-xl border px-4 py-2 text-sm font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
                   vote.userVote === 1
                     ? "border-emerald-200 bg-emerald-50 text-emerald-700"
@@ -549,7 +567,7 @@ export default function YouTypeApp({ devMode = false, adminToken }: YouTypeAppPr
               <button
                 type="button"
                 onClick={() => handleVote(allowed.top_match!.id, -1)}
-                disabled={Boolean(vote.userVote) || voting}
+                disabled={voting}
                 className={`flex-1 rounded-xl border px-4 py-2 text-sm font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
                   vote.userVote === -1
                     ? "border-rose-200 bg-rose-50 text-rose-700"

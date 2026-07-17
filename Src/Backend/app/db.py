@@ -202,9 +202,10 @@ def cast_vote(*, post_id: str, ip_hash: str, value: int) -> Optional[Dict[str, A
     """Record an Allow(1)/Block(-1) vote from a given ip_hash on a post and
     every other active post similar enough to count as the same statement.
 
-    Each ip_hash may vote on a given post exactly once; a repeat attempt does
-    not change the recorded vote and is reported back via `already_voted`.
-    Returns None if the post doesn't exist.
+    Each ip_hash has at most one vote per post; casting again with a
+    different value switches it (and switches it on every similar post this
+    ip_hash already voted on, so a single switch stays consistent across the
+    cluster). Returns None if the post doesn't exist.
     """
     with session_scope() as session:
         post = session.get(Post, post_id)
@@ -223,24 +224,21 @@ def cast_vote(*, post_id: str, ip_hash: str, value: int) -> Optional[Dict[str, A
             )
             affected_ids.extend(row.id for row in similar)
 
-        existing = (
-            session.query(Vote)
-            .filter(Vote.post_id == post_id, Vote.ip_hash == ip_hash)
-            .one_or_none()
-        )
-        already_voted = existing is not None
+        existing_votes = {
+            row.post_id: row
+            for row in session.query(Vote).filter(
+                Vote.post_id.in_(affected_ids), Vote.ip_hash == ip_hash
+            )
+        }
+        already_voted = post_id in existing_votes
 
-        if not already_voted:
-            already_cast_on = {
-                row.post_id
-                for row in session.query(Vote.post_id).filter(
-                    Vote.post_id.in_(affected_ids), Vote.ip_hash == ip_hash
-                )
-            }
-            for pid in affected_ids:
-                if pid not in already_cast_on:
-                    session.add(Vote(post_id=pid, ip_hash=ip_hash, value=value))
-            session.flush()
+        for pid in affected_ids:
+            existing = existing_votes.get(pid)
+            if existing is None:
+                session.add(Vote(post_id=pid, ip_hash=ip_hash, value=value))
+            elif existing.value != value:
+                existing.value = value
+        session.flush()
 
         result: Optional[Dict[str, Any]] = None
         for pid in affected_ids:
@@ -260,7 +258,8 @@ def cast_vote(*, post_id: str, ip_hash: str, value: int) -> Optional[Dict[str, A
             p.upvotes = allow_votes
             p.downvotes = block_votes
             # Blocking is one-way: once a post is blocked it stays blocked, even
-            # if later Allow votes would bring the ratio back down.
+            # if later Allow votes (or switched votes) would bring the ratio
+            # back down.
             if (
                 p.status == "active"
                 and total_votes >= BLOCK_MIN_VOTES
@@ -274,7 +273,7 @@ def cast_vote(*, post_id: str, ip_hash: str, value: int) -> Optional[Dict[str, A
                     "block_votes": block_votes,
                     "total_votes": total_votes,
                     "status": p.status,
-                    "user_vote": existing.value if already_voted else value,
+                    "user_vote": value,
                     "already_voted": already_voted,
                     "affected_count": len(affected_ids),
                 }
