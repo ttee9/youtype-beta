@@ -257,15 +257,14 @@ def cast_vote(*, post_id: str, ip_hash: str, value: int) -> Optional[Dict[str, A
 
             p.upvotes = allow_votes
             p.downvotes = block_votes
-            # Blocking is one-way: once a post is blocked it stays blocked, even
-            # if later Allow votes (or switched votes) would bring the ratio
-            # back down.
-            if (
-                p.status == "active"
-                and total_votes >= BLOCK_MIN_VOTES
-                and block_votes / total_votes >= BLOCK_VOTE_RATIO
-            ):
+            # Status is a pure function of the current tallies, recomputed on
+            # every vote — a post can move back to active if the ratio drops
+            # below the threshold again (e.g. votes get switched), not just
+            # toward blocked.
+            if total_votes >= BLOCK_MIN_VOTES and block_votes / total_votes >= BLOCK_VOTE_RATIO:
                 p.status = "blocked"
+            else:
+                p.status = "active"
 
             if pid == post_id:
                 result = {

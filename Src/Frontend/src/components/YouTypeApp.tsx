@@ -540,7 +540,8 @@ export default function YouTypeApp({ devMode = false, adminToken }: YouTypeAppPr
             {showModerationInfo && (
               <p className="mt-2 rounded-lg bg-gray-50 px-3 py-2 text-xs leading-relaxed text-gray-500">
                 Once a post gets enough votes and a high enough share of them are Block, it's
-                hidden from search — permanently, even if later votes lean back toward Allow.
+                hidden from search. This isn't permanent — if the mix of votes shifts back
+                toward Allow, it becomes visible again.
               </p>
             )}
             <p className="mt-1 text-xs text-gray-400">
