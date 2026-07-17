@@ -230,9 +230,10 @@ def delete_post(post_id: str):
 @app.post("/posts/{post_id}/vote", response_model=VoteResponse)
 @limiter.limit("30/minute")
 def vote_post(request: Request, post_id: str, payload: VoteRequest = Body(...)):
-    """Cast an Allow/Block vote; exactly one vote per IP per post, but the
-    vote is applied to this post and every other active post similar enough
-    (see SIMILARITY_THRESHOLD) to count as the same statement.
+    """Cast an Allow/Block vote. Each IP holds at most one vote per post;
+    casting again with a different value switches it. The vote is applied
+    to this post and every other active post similar enough (see
+    SIMILARITY_THRESHOLD) to count as the same statement.
 
     A post is blocked (hidden from feeds and similarity search) once it has
     at least BLOCK_MIN_VOTES total votes and at least BLOCK_VOTE_RATIO of
