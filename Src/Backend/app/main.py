@@ -19,6 +19,8 @@ from app.embeddings import embed_text
 from app.moderation import is_low_quality, moderate
 from app.db import (
     cast_vote,
+    count_people,
+    find_own_duplicate,
     get_vote,
     init_db,
     insert_post,
@@ -31,6 +33,10 @@ from app.db import (
 
 load_dotenv()
 
+# Number of reverse proxies in front of this app that append to
+# X-Forwarded-For (1 for a single PaaS edge such as Railway).
+TRUSTED_PROXY_HOPS = max(1, int(os.getenv("TRUSTED_PROXY_HOPS", "1")))
+
 
 def get_client_ip(request: Request) -> str:
     """Real client IP, not the reverse proxy's.
@@ -38,13 +44,35 @@ def get_client_ip(request: Request) -> str:
     Railway/Render (and similar PaaS) terminate the connection at their own
     edge and forward to this app, so request.client.host is the proxy's
     address rather than the visitor's — and can vary per-request, making
-    every hit look like a new visitor. Their edge sets X-Forwarded-For to
-    the actual client IP, so prefer that when present.
+    every hit look like a new visitor. Their edge appends the address it
+    saw to X-Forwarded-For, so read the header from the right.
+
+    Only the rightmost TRUSTED_PROXY_HOPS entries were written by proxies we
+    trust; anything to their left came from the client and can be forged
+    (sending "X-Forwarded-For: 1.2.3.4" would otherwise mint a new identity
+    per request, defeating rate limits, one-vote-per-IP and people counts).
     """
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
-        return forwarded.split(",")[0].strip()
+        hops = [h.strip() for h in forwarded.split(",") if h.strip()]
+        if hops:
+            return hops[-min(TRUSTED_PROXY_HOPS, len(hops))]
     return get_remote_address(request)
+
+
+def hash_ip(ip: str) -> str:
+    return hashlib.sha256(ip.encode()).hexdigest()
+
+
+def get_client_hash(request: Request) -> Optional[str]:
+    """Hash of the random per-browser token the frontend sends as
+    X-Client-Id. It's client-chosen, so it's only used to catch repeats
+    from someone whose IP changed (e.g. phone switching networks), never to
+    count people."""
+    client_id = request.headers.get("x-client-id", "").strip()
+    if not client_id or len(client_id) > 100:
+        return None
+    return hashlib.sha256(client_id.encode()).hexdigest()
 
 
 def require_admin(request: Request) -> None:
@@ -183,6 +211,10 @@ class AllowedResponse(BaseModel):
     status: Literal["allowed"] = "allowed"
     top_match: Optional[TopMatch] = None
     similar_count: int
+    # Distinct people behind the similar posts (see app.db.count_people).
+    people_count: int
+    # Whether the searcher is already one of those people.
+    already_counted: bool
     similarity_threshold: float
     trend: List[TrendPoint]
     trend_granularity: Literal["day", "week", "month"]
@@ -240,8 +272,7 @@ def vote_post(request: Request, post_id: str, payload: VoteRequest = Body(...)):
     them are Block votes. This is the community-moderation mechanism
     replacing fixed content rules.
     """
-    ip = get_client_ip(request)
-    ip_hash = hashlib.sha256(ip.encode()).hexdigest()
+    ip_hash = hash_ip(get_client_ip(request))
     result = cast_vote(post_id=post_id, ip_hash=ip_hash, value=payload.value)
     if result is None:
         raise HTTPException(status_code=404, detail="Post not found")
@@ -378,11 +409,15 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
     ]
 
     # 6) The closest existing post (if any) is what Allow/Block votes attach to.
+    ip_hash = hash_ip(get_client_ip(request))
+    client_hash = get_client_hash(request)
+    already_counted = any(
+        p.get("ip_hash") == ip_hash or (client_hash and p.get("client_hash") == client_hash)
+        for p in scored_posts
+    )
     top_match: Optional[TopMatch] = None
     if scored_posts:
         best = scored_posts[0]
-        ip = get_client_ip(request)
-        ip_hash = hashlib.sha256(ip.encode()).hexdigest()
         top_match = TopMatch(
             id=best["id"],
             text=best["text"],
@@ -397,6 +432,8 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
     return AllowedResponse(
         top_match=top_match,
         similar_count=len(scored_posts),
+        people_count=count_people(scored_posts),
+        already_counted=already_counted,
         similarity_threshold=threshold,
         trend=trend,
         trend_granularity=granularity,
@@ -425,6 +462,11 @@ async def post_only(request: Request, payload: PostOnlyRequest = Body(...)):
     except RuntimeError:
         return {"status": "rejected", "reason": "Analysis service unavailable. Please try again later."}
 
+    ip_hash = hash_ip(get_client_ip(request))
+    client_hash = get_client_hash(request)
+    if find_own_duplicate(query_embedding=embedding, ip_hash=ip_hash, client_hash=client_hash):
+        return {"status": "rejected", "reason": "You've already said this, and you're already counted."}
+
     post_id = str(uuid4())
     created_at = _now_utc().isoformat()
     record = {
@@ -433,6 +475,8 @@ async def post_only(request: Request, payload: PostOnlyRequest = Body(...)):
         "location": (payload.location or "").strip() or None,
         "created_at": created_at,
         "embedding": embedding,
+        "ip_hash": ip_hash,
+        "client_hash": client_hash,
     }
     try:
         insert_post(post=record)

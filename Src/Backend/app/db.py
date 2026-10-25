@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from typing import Any, Dict, Iterator, List, Optional
 
 from dotenv import load_dotenv
-from sqlalchemy import Integer, String, Text, UniqueConstraint, create_engine, func, text
+from sqlalchemy import Integer, String, Text, UniqueConstraint, create_engine, func, or_, text
 from sqlalchemy.orm import DeclarativeBase, Session, Mapped, mapped_column
 from pgvector.sqlalchemy import Vector
 
@@ -20,6 +20,10 @@ BLOCK_VOTE_RATIO = 0.65
 # thing" for both search matching and community moderation — an Allow/Block
 # vote on one of them is cast on all of them.
 SIMILARITY_THRESHOLD = 0.78
+
+# A new post at or above this similarity to one the same person already
+# made is a repeat, not a new statement, and is refused at /post.
+DUPLICATE_THRESHOLD = 0.92
 
 engine = create_engine(os.getenv("DATABASE_URL"), future=True)
 
@@ -39,6 +43,10 @@ class Post(Base):
     upvotes: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     downvotes: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     status: Mapped[str] = mapped_column(String, nullable=False, default="active", server_default="active")
+    # Who posted it, for counting distinct people and refusing repeats.
+    # Null on posts made before these columns existed.
+    ip_hash: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    client_hash: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
 
 class Vote(Base):
@@ -63,6 +71,10 @@ def init_db() -> None:
         conn.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS upvotes INTEGER NOT NULL DEFAULT 0"))
         conn.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS downvotes INTEGER NOT NULL DEFAULT 0"))
         conn.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS status VARCHAR NOT NULL DEFAULT 'active'"))
+        conn.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS ip_hash VARCHAR"))
+        conn.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS client_hash VARCHAR"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_posts_ip_hash ON posts (ip_hash)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_posts_client_hash ON posts (client_hash)"))
         conn.commit()
 
 
@@ -81,6 +93,8 @@ def insert_post(*, post: Dict[str, Any]) -> None:
                 location=post.get("location"),
                 created_at=post["created_at"],
                 embedding=post.get("embedding") or None,
+                ip_hash=post.get("ip_hash"),
+                client_hash=post.get("client_hash"),
             )
         )
         session.commit()
@@ -95,6 +109,38 @@ def get_vote(*, post_id: str, ip_hash: str) -> Optional[int]:
             .one_or_none()
         )
         return vote.value if vote else None
+
+
+def find_own_duplicate(
+    *, query_embedding: List[float], ip_hash: str, client_hash: Optional[str]
+) -> Optional[str]:
+    """Return the id of a post this person (same ip_hash or, when given, same
+    client_hash) already made that is at or above DUPLICATE_THRESHOLD
+    similarity to query_embedding, or None. Blocked posts count too, so a
+    repeat can't be used to get around community moderation."""
+    same_person = Post.ip_hash == ip_hash
+    if client_hash:
+        same_person = or_(same_person, Post.client_hash == client_hash)
+    with session_scope() as session:
+        row = (
+            session.query(Post.id)
+            .filter(Post.embedding.isnot(None))
+            .filter(same_person)
+            .filter((1 - Post.embedding.cosine_distance(query_embedding)) >= DUPLICATE_THRESHOLD)
+            .first()
+        )
+        return row.id if row else None
+
+
+def count_people(posts: List[Dict[str, Any]]) -> int:
+    """Distinct people behind a list of posts (as returned by
+    find_similar_posts). People are told apart by ip_hash only: the client
+    token is chosen by the browser, so counting it would let one person
+    inflate the number just by clearing storage. Posts from before poster
+    tracking have no ip_hash and count as one person each."""
+    ip_hashes = {p["ip_hash"] for p in posts if p.get("ip_hash")}
+    untracked = sum(1 for p in posts if not p.get("ip_hash"))
+    return len(ip_hashes) + untracked
 
 
 def find_similar_posts(
@@ -124,6 +170,8 @@ def find_similar_posts(
                 "similarity": float(row.similarity),
                 "upvotes": row.Post.upvotes,
                 "downvotes": row.Post.downvotes,
+                "ip_hash": row.Post.ip_hash,
+                "client_hash": row.Post.client_hash,
             }
             for row in results
         ]
