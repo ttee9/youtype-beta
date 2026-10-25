@@ -7,6 +7,29 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 
 type TrendPoint = { date: string; count: number };
 
+/** Random per-browser id sent as X-Client-Id so the API can spot someone
+ *  repeating a post after their IP changes. Not used to count people. */
+function getClientId(): string | null {
+  try {
+    const key = "youtype_client_id";
+    let id = localStorage.getItem(key);
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem(key, id);
+    }
+    return id;
+  } catch {
+    return null;
+  }
+}
+
+function apiHeaders(): Record<string, string> {
+  const clientId = getClientId();
+  return clientId
+    ? { "Content-Type": "application/json", "X-Client-Id": clientId }
+    : { "Content-Type": "application/json" };
+}
+
 type TopMatch = {
   id: string;
   text: string;
@@ -23,6 +46,8 @@ type SubmitResponse =
       status: "allowed";
       top_match: TopMatch | null;
       similar_count: number;
+      people_count?: number; // absent from APIs that predate per-person counts
+      already_counted?: boolean;
       similarity_threshold: number;
       trend: TrendPoint[];
       trend_granularity: "day" | "week" | "month";
@@ -52,6 +77,8 @@ function mockResponse(): SubmitResponse {
       user_vote: null,
     },
     similar_count: 3421,
+    people_count: 2980,
+    already_counted: false,
     similarity_threshold: 0.82,
     trend: days,
     trend_granularity: "day",
@@ -218,13 +245,13 @@ export default function YouTypeApp({ devMode = false, adminToken }: YouTypeAppPr
     const milestone = fromSearch
       ? fromSearch.priorCount === 0
         ? "You're the first to say this."
-        : `That makes ${fmtInt(fromSearch.priorCount + 1)} similar posts.`
+        : `That makes ${fmtInt(fromSearch.priorCount + 1)} people.`
       : undefined;
 
     try {
       const res = await fetch(`${API_BASE}/post`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: apiHeaders(),
         body: JSON.stringify({ text: postedText }),
       });
       const data = await res.json();
@@ -285,7 +312,7 @@ export default function YouTypeApp({ devMode = false, adminToken }: YouTypeAppPr
     try {
       const res = await fetch(`${API_BASE}/submit`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: apiHeaders(),
         body: JSON.stringify({ text: text.trim() }),
       });
 
@@ -393,7 +420,9 @@ export default function YouTypeApp({ devMode = false, adminToken }: YouTypeAppPr
   const rejected = result && result.status === "rejected" ? result : null;
   const showAnalysis = Boolean(allowed) && !(vote?.blocked ?? false);
 
-  const bigCount = useCountUp(allowed?.similar_count ?? 0, { durationMs: 1100 });
+  // Older APIs don't send people_count yet; fall back to the post count.
+  const peopleCount = allowed ? allowed.people_count ?? allowed.similar_count : 0;
+  const bigCount = useCountUp(peopleCount, { durationMs: 1100 });
 
   const displayExamples = useMemo<
     Array<{ id: string; text: string; similarity: number; created_at: string }>
@@ -545,38 +574,53 @@ export default function YouTypeApp({ devMode = false, adminToken }: YouTypeAppPr
         {showAnalysis && (
           <div className="mt-4 rounded-2xl bg-purple-700 px-8 py-7 text-white">
             <div className="text-xs font-semibold uppercase tracking-widest text-purple-200">
-              Number of Similar Texts
+              People Who Said Something Similar
             </div>
             <div className="mt-1.5 text-7xl font-black tabular-nums tracking-tight leading-none">
               {fmtInt(bigCount)}
             </div>
+            {allowed && allowed.similar_count > peopleCount && (
+              <div className="mt-2 text-sm text-purple-200">
+                across {fmtInt(allowed.similar_count)} posts
+              </div>
+            )}
           </div>
         )}
 
         {/* Invitation to post what was just searched */}
         {showAnalysis && allowed && searchedText && (
-          <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-indigo-100 bg-indigo-50 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="font-semibold text-indigo-950">
-                {allowed.similar_count === 0
-                  ? "No one has said this yet. Be the first."
-                  : `${fmtInt(allowed.similar_count)} similar ${allowed.similar_count === 1 ? "post" : "posts"} so far.`}
-              </div>
+          allowed.already_counted ? (
+            <div className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50 p-5">
+              <div className="font-semibold text-indigo-950">You&apos;ve already said something like this.</div>
               <p className="mt-0.5 text-sm text-indigo-700">
-                {allowed.similar_count === 0
-                  ? "Post it and start the count."
-                  : `Add yours to make it ${fmtInt(allowed.similar_count + 1)}.`}
+                You&apos;re counted among the {fmtInt(peopleCount)}{" "}
+                {peopleCount === 1 ? "person" : "people"} above.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => onPost({ text: searchedText, priorCount: allowed.similar_count })}
-              disabled={loading !== "idle"}
-              className="shrink-0 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {loading === "posting" ? "Posting…" : allowed.similar_count === 0 ? "Post this" : "Add my voice"}
-            </button>
-          </div>
+          ) : (
+            <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-indigo-100 bg-indigo-50 p-5 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="font-semibold text-indigo-950">
+                  {peopleCount === 0
+                    ? "No one has said this yet. Be the first."
+                    : `${fmtInt(peopleCount)} ${peopleCount === 1 ? "person has" : "people have"} said something similar.`}
+                </div>
+                <p className="mt-0.5 text-sm text-indigo-700">
+                  {peopleCount === 0
+                    ? "Post it and start the count."
+                    : `Add yours to make it ${fmtInt(peopleCount + 1)}.`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onPost({ text: searchedText, priorCount: peopleCount })}
+                disabled={loading !== "idle"}
+                className="shrink-0 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {loading === "posting" ? "Posting…" : peopleCount === 0 ? "Post this" : "Add my voice"}
+              </button>
+            </div>
+          )
         )}
 
         {/* Posted (Type flow) */}
