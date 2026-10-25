@@ -167,7 +167,10 @@ export default function YouTypeApp({ devMode = false, adminToken }: YouTypeAppPr
   const [result, setResult] = useState<SubmitResponse | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [lastPosted, setLastPosted] = useState<{ id: string; text: string } | null>(null);
+  const [lastPosted, setLastPosted] = useState<{ id: string; text: string; milestone?: string } | null>(null);
+  // Text of the last completed search, so the "Be the first" / "Add yours"
+  // invitation posts exactly what was searched even if the textarea changed.
+  const [searchedText, setSearchedText] = useState<string | null>(null);
   const [vote, setVote] = useState<VoteState | null>(null);
   const [voting, setVoting] = useState(false);
   const [voteError, setVoteError] = useState<string | null>(null);
@@ -177,8 +180,14 @@ export default function YouTypeApp({ devMode = false, adminToken }: YouTypeAppPr
   const canPost = useMemo(() => text.trim().length >= 5 && loading === "idle", [text, loading]);
   const canSearch = useMemo(() => text.trim().length >= 10 && loading === "idle", [text, loading]);
 
-  async function onPost() {
-    if (!canPost) {
+  /** Post the textarea text, or — from the search-result invitation — the
+   *  text that was just searched, along with how many similar posts it had. */
+  async function onPost(fromSearch?: { text: string; priorCount: number }) {
+    if (fromSearch && loading !== "idle") {
+      setError("Please wait—an action is already in progress.");
+      return;
+    }
+    if (!fromSearch && !canPost) {
       setNotice(null);
       setResult(null);
       if (text.trim().length < 5) {
@@ -193,6 +202,7 @@ export default function YouTypeApp({ devMode = false, adminToken }: YouTypeAppPr
     setError(null);
     setResult(null);
     setLastPosted(null);
+    setSearchedText(null);
     setVote(null);
     setVoteError(null);
     setLoading("posting");
@@ -204,20 +214,25 @@ export default function YouTypeApp({ devMode = false, adminToken }: YouTypeAppPr
       return;
     }
 
-    const postedText = text.trim();
+    const postedText = (fromSearch?.text ?? text).trim();
+    const milestone = fromSearch
+      ? fromSearch.priorCount === 0
+        ? "You're the first to say this."
+        : `That makes ${fmtInt(fromSearch.priorCount + 1)} similar posts.`
+      : undefined;
 
     try {
       const res = await fetch(`${API_BASE}/post`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text.trim() }),
+        body: JSON.stringify({ text: postedText }),
       });
       const data = await res.json();
       if (data?.status === "rejected") {
         setError(data?.reason ?? "Rejected");
       } else if (data?.status === "ok") {
-        setNotice("Posted successfully.");
-        setLastPosted({ id: data.id, text: postedText });
+        if (!milestone) setNotice("Posted successfully.");
+        setLastPosted({ id: data.id, text: postedText, milestone });
       } else {
         setError("Unexpected response from server.");
       }
@@ -245,6 +260,7 @@ export default function YouTypeApp({ devMode = false, adminToken }: YouTypeAppPr
     setLoading("analyzing");
     setResult(null);
     setLastPosted(null);
+    setSearchedText(null);
     setVote(null);
     setVoteError(null);
 
@@ -252,6 +268,7 @@ export default function YouTypeApp({ devMode = false, adminToken }: YouTypeAppPr
       await new Promise((res) => setTimeout(res, 200));
       const mock = mockResponse();
       setResult(mock);
+      setSearchedText(text.trim());
       if (mock.status === "allowed" && mock.top_match) {
         setVote({
           allowVotes: mock.top_match.allow_votes,
@@ -279,6 +296,7 @@ export default function YouTypeApp({ devMode = false, adminToken }: YouTypeAppPr
 
       const data = await res.json();
       setResult(data);
+      if (data?.status === "allowed") setSearchedText(text.trim());
       if (data?.status === "allowed" && data.top_match) {
         const tm = data.top_match;
         setVote({
@@ -484,7 +502,7 @@ export default function YouTypeApp({ devMode = false, adminToken }: YouTypeAppPr
           <div className="mt-3 flex gap-2">
             <button
               className="flex-1 rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
-              onClick={onPost}
+              onClick={() => onPost()}
               disabled={!canPost}
               type="button"
             >
@@ -542,8 +560,8 @@ export default function YouTypeApp({ devMode = false, adminToken }: YouTypeAppPr
             </div>
             {showModerationInfo && (
               <p className="mt-2 rounded-lg bg-gray-50 px-3 py-2 text-xs leading-relaxed text-gray-500">
-                Once a post gets enough votes and a high enough share of them are Block, it's
-                hidden from search. This isn't permanent — if the mix of votes shifts back
+                Once a post gets enough votes and a high enough share of them are Block, it&apos;s
+                hidden from search. This isn&apos;t permanent — if the mix of votes shifts back
                 toward Allow, it becomes visible again.
               </p>
             )}
@@ -627,9 +645,38 @@ export default function YouTypeApp({ devMode = false, adminToken }: YouTypeAppPr
           </div>
         )}
 
+        {/* Invitation to post what was just searched */}
+        {showAnalysis && allowed && searchedText && (
+          <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-indigo-100 bg-indigo-50 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="font-semibold text-indigo-950">
+                {allowed.similar_count === 0
+                  ? "No one has said this yet. Be the first."
+                  : `${fmtInt(allowed.similar_count)} similar ${allowed.similar_count === 1 ? "post" : "posts"} so far.`}
+              </div>
+              <p className="mt-0.5 text-sm text-indigo-700">
+                {allowed.similar_count === 0
+                  ? "Post it and start the count."
+                  : `Add yours to make it ${fmtInt(allowed.similar_count + 1)}.`}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => onPost({ text: searchedText, priorCount: allowed.similar_count })}
+              disabled={loading !== "idle"}
+              className="shrink-0 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {loading === "posting" ? "Posting…" : allowed.similar_count === 0 ? "Post this" : "Add my voice"}
+            </button>
+          </div>
+        )}
+
         {/* Posted (Type flow) */}
         {lastPosted && (
           <div className="mt-4 rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
+            {lastPosted.milestone && (
+              <div className="mb-2 text-sm font-semibold text-indigo-700">Posted. {lastPosted.milestone}</div>
+            )}
             <p className="text-sm leading-relaxed text-gray-800 whitespace-pre-wrap break-words">{lastPosted.text}</p>
             <div className="mt-2.5">
               <span className="text-xs text-gray-400">just now</span>
@@ -755,33 +802,29 @@ export default function YouTypeApp({ devMode = false, adminToken }: YouTypeAppPr
         ) : null}
 
         {/* Most Similar */}
-        {showAnalysis && (
+        {showAnalysis && mostSimilarGroups.length > 0 && (
           <div className="mt-6">
             <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-gray-400">
               Most Similar
             </div>
-            {mostSimilarGroups.length ? (
-              <div className="space-y-2">
-                {mostSimilarGroups.map((g, idx) => (
-                  <div
-                    key={`${g.text}-${idx}`}
-                    className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm"
-                  >
-                    <p className="text-sm leading-relaxed text-gray-800 whitespace-pre-wrap break-words">{g.text}</p>
-                    <div className="mt-2.5 flex flex-wrap items-center gap-2">
-                      <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-semibold text-indigo-600">
-                        {Math.round(g.bestSimilarity * 100)}% match
-                      </span>
-                      {g.duplicates > 1 && (
-                        <span className="text-xs text-gray-400">{fmtInt(g.duplicates)} copies</span>
-                      )}
-                    </div>
+            <div className="space-y-2">
+              {mostSimilarGroups.map((g, idx) => (
+                <div
+                  key={`${g.text}-${idx}`}
+                  className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm"
+                >
+                  <p className="text-sm leading-relaxed text-gray-800 whitespace-pre-wrap break-words">{g.text}</p>
+                  <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                    <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-semibold text-indigo-600">
+                      {Math.round(g.bestSimilarity * 100)}% match
+                    </span>
+                    {g.duplicates > 1 && (
+                      <span className="text-xs text-gray-400">{fmtInt(g.duplicates)} copies</span>
+                    )}
                   </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-gray-400">No similar posts found yet.</p>
-            )}
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
