@@ -450,8 +450,11 @@ export default function YouTypeApp({ devMode = false, adminToken }: YouTypeAppPr
         {/* Header */}
         <div className="mb-7 flex items-center justify-between">
           <div>
-            <div className="text-2xl font-black tracking-tight text-gray-950">YouType</div>
-            <div className="text-sm text-gray-400 mt-0.5">See who else is thinking what you&apos;re thinking</div>
+            <div className="flex items-center gap-2">
+              <div className="text-2xl font-black tracking-tight text-gray-950">YouType</div>
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700 uppercase tracking-wide">MVP</span>
+            </div>
+            <div className="text-sm text-gray-400 mt-0.5">Minimal Viable Prototype · See who else is thinking what you&apos;re thinking</div>
           </div>
           <a
             href={process.env.NEXT_PUBLIC_DONATE_URL || "#"}

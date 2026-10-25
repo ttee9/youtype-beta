@@ -64,7 +64,7 @@ def require_admin(request: Request) -> None:
 # Note: memory:// storage is per-process; use Redis for multi-worker deployments.
 limiter = Limiter(key_func=get_client_ip, strategy="moving-window")
 
-app = FastAPI(title="YouType API")
+app = FastAPI(title="YouType API (MVP)", description="Minimal Viable Prototype")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
