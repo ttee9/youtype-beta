@@ -48,6 +48,7 @@ type SubmitResponse =
       similar_count: number;
       people_count?: number; // absent from APIs that predate per-person counts
       already_counted?: boolean;
+      can_post?: boolean;
       similarity_threshold: number;
       trend: TrendPoint[];
       trend_granularity: "day" | "week" | "month";
@@ -79,6 +80,7 @@ function mockResponse(): SubmitResponse {
     similar_count: 3421,
     people_count: 2980,
     already_counted: false,
+    can_post: true,
     similarity_threshold: 0.82,
     trend: days,
     trend_granularity: "day",
@@ -587,15 +589,20 @@ export default function YouTypeApp({ devMode = false, adminToken }: YouTypeAppPr
           </div>
         )}
 
-        {/* Invitation to post what was just searched */}
+        {/* Invitation to post what was just searched — only offered when /post
+            would accept it: not if this person already said something similar,
+            or already posted this (can_post also covers their own posts that
+            were since voted down). */}
         {showAnalysis && allowed && searchedText && (
-          allowed.already_counted ? (
+          allowed.already_counted || allowed.can_post === false ? (
             <div className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50 p-5">
               <div className="font-semibold text-indigo-950">You&apos;ve already said something like this.</div>
-              <p className="mt-0.5 text-sm text-indigo-700">
-                You&apos;re counted among the {fmtInt(peopleCount)}{" "}
-                {peopleCount === 1 ? "person" : "people"} above.
-              </p>
+              {allowed.already_counted && (
+                <p className="mt-0.5 text-sm text-indigo-700">
+                  You&apos;re counted among the {fmtInt(peopleCount)}{" "}
+                  {peopleCount === 1 ? "person" : "people"} above.
+                </p>
+              )}
             </div>
           ) : (
             <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-indigo-100 bg-indigo-50 p-5 sm:flex-row sm:items-center sm:justify-between">

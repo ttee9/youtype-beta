@@ -215,6 +215,9 @@ class AllowedResponse(BaseModel):
     people_count: int
     # Whether the searcher is already one of those people.
     already_counted: bool
+    # Whether /post would accept this text from the searcher, i.e. they
+    # haven't already posted something near-identical (see find_own_duplicate).
+    can_post: bool
     similarity_threshold: float
     trend: List[TrendPoint]
     trend_granularity: Literal["day", "week", "month"]
@@ -415,6 +418,9 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
         p.get("ip_hash") == ip_hash or (client_hash and p.get("client_hash") == client_hash)
         for p in scored_posts
     )
+    can_post = find_own_duplicate(
+        query_embedding=embedding, ip_hash=ip_hash, client_hash=client_hash
+    ) is None
     top_match: Optional[TopMatch] = None
     if scored_posts:
         best = scored_posts[0]
@@ -434,6 +440,7 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
         similar_count=len(scored_posts),
         people_count=count_people(scored_posts),
         already_counted=already_counted,
+        can_post=can_post,
         similarity_threshold=threshold,
         trend=trend,
         trend_granularity=granularity,
