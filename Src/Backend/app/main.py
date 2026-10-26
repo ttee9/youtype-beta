@@ -92,7 +92,7 @@ def require_admin(request: Request) -> None:
 # Note: memory:// storage is per-process; use Redis for multi-worker deployments.
 limiter = Limiter(key_func=get_client_ip, strategy="moving-window")
 
-app = FastAPI(title="YouType API (MVP)", description="Minimal Viable Prototype")
+app = FastAPI(title="YouType API (Beta)")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -221,7 +221,6 @@ class AllowedResponse(BaseModel):
     similarity_threshold: float
     trend: List[TrendPoint]
     trend_granularity: Literal["day", "week", "month"]
-    common_phrases: List[str]
     examples: List[Example]
 
 
@@ -390,15 +389,7 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
 
     trend = [TrendPoint(date=d, count=buckets[d]) for d in sorted(buckets.keys())]
 
-    # 4) Common phrasing (MVP placeholder)
-    common_phrases = [
-        "rent is too high",
-        "unaffordable housing",
-        "cost of living is rising",
-        "prices keep going up",
-    ]
-
-    # 5) Examples (top 5)
+    # 4) Examples (top 5)
     examples = [
         Example(
             id=p["id"],
@@ -411,7 +402,7 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
         for p in scored_posts[:5]
     ]
 
-    # 6) The closest existing post (if any) is what Allow/Block votes attach to.
+    # 5) The closest existing post (if any) is what Allow/Block votes attach to.
     ip_hash = hash_ip(get_client_ip(request))
     client_hash = get_client_hash(request)
     already_counted = any(
@@ -444,7 +435,6 @@ async def submit(request: Request, payload: SubmitRequest = Body(...)):
         similarity_threshold=threshold,
         trend=trend,
         trend_granularity=granularity,
-        common_phrases=common_phrases,
         examples=examples,
     )
 
